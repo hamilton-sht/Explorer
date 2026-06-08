@@ -65,8 +65,6 @@ def run_one(args, index, url):
     env = os.environ.copy()
     env.setdefault("MODEL_NAME", args.model)
     env.setdefault("API_BASE_URL", args.api_base_url)
-    env.setdefault("CLAUDE_COMPAT_IMAGE_MAX_EDGE", str(args.image_max_edge))
-    env.setdefault("CLAUDE_COMPAT_IMAGE_QUALITY", str(args.image_quality))
     env.setdefault("CLAUDE_COMPAT_MAX_TEXT_CHARS", str(args.max_text_chars))
 
     cmd = [
@@ -234,8 +232,6 @@ def main():
     parser.add_argument("--viewport-width", type=int, default=1920)
     parser.add_argument("--viewport-height", type=int, default=1080)
     parser.add_argument("--timeout-seconds", type=int, default=1200)
-    parser.add_argument("--image-max-edge", type=int, default=1024)
-    parser.add_argument("--image-quality", type=int, default=75)
     parser.add_argument("--max-text-chars", type=int, default=60000)
     args = parser.parse_args()
 

@@ -43,21 +43,6 @@ def _convert_claude_compatible_content(content):
         media_type = match.group(1)
         image_data = match.group(2)
 
-        try:
-            image = Image.open(BytesIO(base64.b64decode(image_data)))
-            max_edge = int(os.getenv("CLAUDE_COMPAT_IMAGE_MAX_EDGE", "1920"))
-            image.thumbnail((max_edge, max_edge))
-            if image.mode != "RGB":
-                image = image.convert("RGB")
-            buffer = BytesIO()
-            quality = int(os.getenv("CLAUDE_COMPAT_IMAGE_QUALITY", "95"))
-            image.save(buffer, format="JPEG", quality=quality, optimize=True)
-            media_type = "image/jpeg"
-            image_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        except Exception:
-            logging.info("failed to compress Claude-compatible image payload")
-            logging.info(traceback.format_exc())
-
         converted.append(
             {
                 "type": "image",

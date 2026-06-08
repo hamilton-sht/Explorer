@@ -47,8 +47,6 @@ def run_one(args, attempt, url):
     env = os.environ.copy()
     env.setdefault("MODEL_NAME", args.model)
     env.setdefault("API_BASE_URL", args.api_base_url)
-    env.setdefault("CLAUDE_COMPAT_IMAGE_MAX_EDGE", "1024")
-    env.setdefault("CLAUDE_COMPAT_IMAGE_QUALITY", "75")
     env.setdefault("CLAUDE_COMPAT_MAX_TEXT_CHARS", "60000")
 
     cmd = [

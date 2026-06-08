@@ -103,10 +103,20 @@ class ScriptBrowserEnv:
         # Use custom viewport size if specified in the config, otherwise use the default.
         viewport_size = self.viewport_size.copy()
 
-        self.context = self.browser.new_context(
-            viewport=viewport_size,
-            device_scale_factor=1,
-        )
+        context_kwargs: dict[str, Any] = {
+            "viewport": viewport_size,
+            "device_scale_factor": 1,
+        }
+        auth_name = getattr(self.args, "auth_name", None)
+        if auth_name:
+            from .auth_helper import load_storage_state
+            state_path = load_storage_state(auth_name)
+            if state_path:
+                context_kwargs["storage_state"] = state_path
+                logging.info(f"Loaded auth state: {state_path}")
+            else:
+                logging.warning(f"auth_name={auth_name!r} set but no saved state found")
+        self.context = self.browser.new_context(**context_kwargs)
         if not url.startswith("http"):
             self.page = None
             return

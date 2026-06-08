@@ -20,6 +20,7 @@ __pycache__/
 .env
 .env.*
 config.sh
+auth/
 
 # OS
 .DS_Store

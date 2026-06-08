@@ -1,0 +1,31 @@
+# Trajectory data (large, excluded)
+trajectories/
+test_run/
+test_traj/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Env / secrets
+.env
+.env.*
+config.sh
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

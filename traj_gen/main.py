@@ -201,7 +201,7 @@ def make_step_record(
         "parsed_action": parsed_action,
         "raw_grounded_action": grounded_action,
         "raw_model_response": raw_response,
-        "x_next": {"image": f"screenshot_next_{step}.png"},
+        "x_next": {"image": f"screenshot_{step + 1}.png"},
         "env_meta_next": {
             "observation_id": next_obs_id,
             "url": next_url,
@@ -672,15 +672,6 @@ class Explorer:
                 # ground / execute the action
                 current_url = current_url_before if browser_env_state else ""
                 next_url = self.browser_env.page.url if self.browser_env.page else current_url
-                next_screenshot_name = f"screenshot_next_{step}.png"
-                next_screenshot_path = os.path.join(ex_log_dir, next_screenshot_name)
-                if not self.args.no_dump_screenshots and self.browser_env.page is not None:
-                    safe_screenshot(
-                        self.browser_env.page,
-                        next_screenshot_path,
-                        fallback_path=raw_screenshot_path,
-                    )
-                    task_trajectory_data["observation_refs"].append(next_screenshot_name)
 
                 step_record = make_step_record(
                     trajectory_id=trajectory_id,
@@ -709,9 +700,7 @@ class Explorer:
                     action["URL_after"] = self.browser_env.page.url
                     task_trajectory_data["actions"].append(action)
                     action_screenshot_history.append(action_som_path)
-                    refiner_image_history.append(
-                        os.path.join(ex_log_dir, f"screenshot_som_{step}.png")
-                    )
+                    refiner_image_history.append(action_som_path)
 
                 logging.info("##############################\n\n")
                 step += 1

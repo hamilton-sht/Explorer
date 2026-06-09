@@ -17,11 +17,11 @@ class TrajectoryVerifierAgent:
 
 There are three types of tasks:
 1. Transaction: The user wants to perform a transaction on the webpage, such as booking a ticket, ordering a product, etc. The bot should at least initiate the add-to-cart or checkout process. It is still a success if the bot has done actions of 'add to cart' or checkout and encounters the login page.  If the bot fails to do so, the task is considered a failure.
-2. Information seeking: The user wants to obtain certain information from the webpage. Count as **success** if EITHER:
-   (a) the agent's final action contains "FINAL ANSWER: <text>" and the answer is factually consistent with the visible page content, OR
-   (b) the final webpage screenshot/text clearly displays the requested information on screen (even if the agent did not articulate an answer), OR
-   (c) the agent has navigated to the section of the website that authoritatively contains the answer (e.g. a "Pricing" page when asked about price, a "Hazards" page when asked about hazards), AND the screenshot shows the relevant content.
-   Count as **failure** if: the bot's final answer (FINAL ANSWER) is factually wrong, OR the agent ended on an irrelevant/error page, OR the agent gave up without reaching content related to the task.
+2. Information seeking: The user wants to obtain certain information from the webpage. **You are given the ENTIRE screenshot history of the trajectory, NOT just the final screenshot. The answer may have been visible in an intermediate screenshot — examine ALL screenshots before judging.** Count as **success** if ANY of:
+   (a) the agent's final action contains `answer("...")` with text that is factually consistent with content visible in ANY screenshot of the trajectory (intermediate OR final). It is COMMON for the agent to find the answer mid-trajectory then navigate back to home — this is still success, NOT failure. OR
+   (b) any screenshot in the trajectory clearly displays the requested information on screen (even if the agent did not articulate an answer), OR
+   (c) the agent navigated through the section of the website that authoritatively contains the answer (e.g. a "Pricing" page, a "Contact" page) during the trajectory, AND a screenshot in the trajectory shows the relevant content.
+   Count as **failure** only if: the bot's final answer is factually inconsistent with ALL screenshots (hallucinated), OR the agent never reached any page containing the requested info, OR the agent gave up before reaching content related to the task.
    Be careful about hard constraints in the task (e.g. "at least 5 items", "for the year 2023") — partial answers covering most but not all required facts still count as success unless the missing piece is the core of the task.
 3. Site navigation: The user wants to navigate to a specific page. Carefully examine the bot's action history and the final state of the webpage to determine whether the bot successfully completes the task. No need to consider the bot's response.
 4. Content modification: The user wants to modify the content of a webpage or configuration. Carefully examine the bot's action history and the final state of the webpage to determine whether the bot successfully completes the task. No need to consider the bot's response.
@@ -77,7 +77,7 @@ Status: "success" or "failure"
 
     def create_request(self, intent, last_actions, image_obs, last_page_md=None):
         if self.args.use_all_screenshots_verifier:
-            prompt = f"""User Intent: {intent}\n Action History: {last_actions}\n The content of the last webpage in markdown format is given below \n{last_page_md}\n The snapshots of all webpages corresponding to the actions are shown in the images."""
+            prompt = f"""User Intent: {intent}\n Action History: {last_actions}\n The HTML content of the FINAL webpage (after the last action) is given below for textual reference — but remember the answer might have been visible on an EARLIER page, so check the images too.\n\n--- FINAL PAGE HTML ---\n{last_page_md}\n\n--- TRAJECTORY SCREENSHOTS ---\nThe screenshots that follow are labelled with their step number. Step 0 is the starting page, then each step shows the page AFTER the agent's action at that step. The last image is `screenshot_final.png` (the page after the trajectory terminated). Examine ALL of them when judging — the requested information may be visible on any one of them, not just the final one."""
         else:
             prompt = f"""User Intent: {intent}\n Action History: {last_actions}\n The content of the last webpage in markdown format is given below \n{last_page_md}\n The last snapshot of the web page is shown in the image."""
 
@@ -86,17 +86,26 @@ Status: "success" or "failure"
         user_msg = [{"type": "text", "text": prompt}]
 
         if isinstance(image_obs, list):
-            for screenshot_path in image_obs:
+            n_total = len(image_obs)
+            for i, screenshot_path in enumerate(image_obs):
                 if os.path.exists(screenshot_path):
-                    print(screenshot_path)
-                    user_msg += [
+                    # Label this image so the verifier knows which step it is.
+                    fname = os.path.basename(screenshot_path)
+                    if "final" in fname:
+                        label = f"Screenshot #{i} — FINAL page (after trajectory ended)"
+                    elif i == 0:
+                        label = f"Screenshot #{i} — Step 0 (initial page, BEFORE any action)"
+                    else:
+                        label = f"Screenshot #{i} — page AFTER step {i - 1}'s action"
+                    user_msg.append({"type": "text", "text": label})
+                    user_msg.append(
                         {
                             "type": "image_url",
                             "image_url": {
                                 "url": pil_to_b64(Image.open(screenshot_path))
                             },
                         }
-                    ]
+                    )
         else:
             user_msg.append(
                 {

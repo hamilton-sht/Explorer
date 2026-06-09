@@ -20,16 +20,21 @@ class TaskRefinerAgent:
     Do the following step by step:
     1. Please predict what action the user might perform next that is consistent with the overall task and previous action list in natural language.
     2. Then based on the screenshot and the natural language action, generate the grounded action.
-    3. Output the SAME overall task verbatim in the "task" field — DO NOT rewrite, paraphrase, or change the task in any way.
+    3. Output the task you are currently pursuing in the "task" field. Default: keep the original overall task verbatim. Only modify it under the controlled-pivot rule below.
 
 
-    *  Task fidelity rules — CRITICAL *
+    *  Task fidelity rules with controlled pivot *
 
-    1. The "task" field in your JSON output MUST exactly match the overall task above, word-for-word. Copy it verbatim.
-    2. Do NOT change the task type (information-seeking ↔ transactional). Do NOT add, drop, or substitute any constraint (price, date, location, identifier, person name).
-    3. If the overall task is information-seeking ("find / check / what is / explain / read about"), keep pursuing the information — do NOT silently convert it into "find a dealer contact form" or "request a quote" or any other action.
-    4. If the task seems impossible on this site, keep pursuing what is visibly available; when a hard blocker or mismatch is clear, issue `stop()`. Do NOT swap in an easier task.
-    5. **Anti-drift check before emitting JSON**: confirm your "task" string is byte-identical to the overall_task above. If they differ at all, fix it before output.
+    1. **Default = keep**: in almost all steps, the "task" field MUST equal the overall task above verbatim. Copy it byte-for-byte.
+    2. Do NOT change the task type lightly (information-seeking ↔ transactional). Do NOT silently drop a date / location / identifier / person name unless the pivot rule (#4) triggers.
+    3. If the overall task is information-seeking ("find / check / what is / explain"), keep pursuing the information. Do NOT secretly convert it into "find a dealer contact form" or any other unrelated action.
+    4. **Controlled pivot — only when truly stuck**: if you have evidence the original task cannot be completed on this site (e.g. you've explored ≥3 distinct paths without progress, OR the specific item / page / value clearly does not exist), you MAY pivot to a closely-related task that satisfies ALL of these:
+       (a) the pivoted task is on the SAME website and the SAME general topic as the original (e.g. original "find revenue 2023" → pivot "find any recent financial figure" is OK; pivot "find dealer contact form" is NOT OK);
+       (b) the pivoted task can be completed in ≤3 more actions from your current state;
+       (c) the pivoted task has a concrete verifiable target (a visible number / date / name / page reached);
+       (d) you have actually attempted the original task with multiple paths before pivoting.
+       When you pivot, the "task" field becomes the pivoted task (NOT the original), and the next action should make progress on the pivot.
+    5. **Anti-frivolous-pivot**: do NOT pivot just because the first path failed. Do NOT pivot to make the task easier without exploring. Pivots are an escape valve, not a shortcut.
 
     *ACTION SPACE*: Your action space is: [`move(x,y)`, `hover(x,y)`, `click(x,y)`, `doubleclick(x,y)`, `rightclick(x,y)`, `type("text")`, `press("Enter")`, `keyup("shift")`, `scroll("down", 600)`, `wait()`, `go_back()`, `go_forward()`, `navigate("https://allowed.example")`, `zoom_region(x,y,w,h)`, `zoom_out()`, `answer("final answer")`, `stop()`].
     Action output should follow the syntax as given below:
@@ -55,12 +60,14 @@ class TaskRefinerAgent:
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
     2. The action should be an atomic action from the given visual function action space.
-    3. All x/y coordinates are image-pixel coordinates from the screenshot. Use the center of the visible target.
+    3. The screenshot is 1920 x 1080 pixels. x ∈ [0, 1920], y ∈ [0, 1080]. Use the center of the visible target.
+       ✓ CORRECT: `click(960, 540)` — clicks the screen center
     4. The grounded action must be exactly one function call from the action space, with no element IDs, no square-bracket syntax, and no extra text.
     5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed.
     6. You should issue `stop()` if the current webpage asks to login or for credit card information.
     7. To input text, first output `click(x,y)` on the target textbox/search field. In the next step output `type("content")`. If submission is needed, output `press("Enter")` as the third separate step. Do not combine click, type, and keypress in one action.
     8. STRICTLY Avoid repeating the same action (click/type) if the webpage remains unchanged. You may have selected the wrong web element.
+    8b. **Anti-scroll-loop**: if you have scrolled in the same direction 3+ times without finding the target content, STOP scrolling. Switch strategy: click a relevant menu link / use the search box / check the footer / try a different section. Endless scrolling wastes the action budget.
     9. If you cannot identify a valid visible text input or search box in the current screenshot, do not output a type action. Use click or scroll instead.
     10. Use quotation marks only for string arguments inside function calls.
 
@@ -68,38 +75,6 @@ class TaskRefinerAgent:
     *OUTPUT FORMAT*: Please give a short analysis of the screenshot and history, then put your answer within ``` ```, for example, "In summary, the proposed task and the corresponding action is: ```{{"task": <TASK>:str, "action_in_natural_language":<ACTION_IN_NATURAL_LANGUAGE>:str, "grounded_action": "click(320,180)"}}```"
     """
 
-    # Task-following variant: used when args.task is set. The overall task is
-    # FIXED — agent must NOT rewrite it. Information seeking is allowed. When
-    # the task asks for a piece of information, the agent should issue answer()
-    # and put the answer in the `answer` field of the JSON output.
-    sm_task_following = """You are an expert web navigation agent. Your overall task is FIXED and given below:
-
-OVERALL TASK: {overall_task}
-
-You are given the webpage screenshot and the list of actions you have already performed: {prev_action_list}.
-
-Your job: pick the NEXT single atomic action that makes progress on the overall task.
-
-*ACTION SPACE*: [`move(x,y)`, `hover(x,y)`, `click(x,y)`, `doubleclick(x,y)`, `rightclick(x,y)`, `type("text")`, `press("Enter")`, `keyup("shift")`, `scroll("down", 600)`, `wait()`, `go_back()`, `go_forward()`, `navigate("https://allowed.example")`, `zoom_region(x,y,w,h)`, `zoom_out()`, `answer("final answer")`, `stop()`].
-
-*RULES*:
-1. Do NOT modify or rewrite the overall task. Output the SAME task verbatim in the "task" field every step.
-2. The action must be a single atomic action from the action space.
-3. **ANSWER CRITERION**: Only issue `answer("...")` when the SPECIFIC information requested is currently VISIBLE in the screenshot. Do NOT stop on the homepage just because the topic seems related. Do NOT invent or paraphrase content that isn't displayed. If the answer is plainly visible on the homepage (banner/headline/main content), stop immediately on step 0 or 1 — do not over-explore.
-4. **Anti-hallucination — VERY IMPORTANT**: When you write a FINAL ANSWER, every fact in it must come DIRECTLY from text you can read in the latest screenshot. Do not use background knowledge. Do not say "based on visible content" if the content isn't actually there. If unsure, KEEP NAVIGATING — click into menus, sections, or sub-pages.
-5. **For information-seeking tasks**: when the page text/visible content already shows the answer, issue `answer("...")` with the FULL answer string in the "answer" field — quote the exact text from the page.
-6. **For multi-step navigation tasks**: complete all listed steps, then issue `answer("")` if everything went through.
-6b. **Unsolvable tasks**: if the site does not contain the requested info, or asks for login/CAPTCHA, issue `stop()` (NOT `answer("not found")` — `stop()` is the dedicated signal).
-7. Don't get stuck — if a path doesn't work after 3-4 actions, try a different path (search box, top nav, footer, sitemap).
-8. **Step budget awareness**: If you have already taken 20+ actions, this is your last chance — issue `answer("...")` on the next action with your best partial answer based on what you have seen so far. Do NOT continue exploring past 25 actions.
-9. STRICTLY avoid repeating the same action if the page didn't change — try a different element or strategy.
-10. To input text, first output `click(x,y)` on the target textbox/search field. In the next step output `type("content")`. If submission is needed, output `press("Enter")` as the third separate step. Do not combine click, type, and keypress in one action.
-11. If a login or credit card page appears, issue `stop()`.
-12. **CRITICAL**: Whenever you issue `answer("...")` on an information-seeking task, the answer string must be NON-EMPTY and the content must be DIRECTLY READABLE in the current screenshot. An answer not grounded in the visible page = failure.
-
-*OUTPUT FORMAT*: Brief analysis, then JSON within ``` ```, e.g.:
-```{{"task": <TASK>, "action_in_natural_language": <ACTION_NL>, "grounded_action": <ACTION>, "answer": <OPTIONAL_ANSWER>}}```
-"""
 
     def act(self, image_obs, action_history, refined_goal, image_history=None):
         is_action_valid = True
@@ -233,16 +208,13 @@ Your job: pick the NEXT single atomic action that makes progress on the overall 
             ]
         )
 
-        is_task_following = bool(getattr(self.args, "task", None))
-        system_prompt = self.sm_task_following if is_task_following else self.sm
-
         messages = [
             {
                 "role": "system",
                 "content": [
                     {
                         "type": "text",
-                        "text": system_prompt.format(
+                        "text": self.sm.format(
                             prev_action_list=action_history,
                             overall_task=self.refined_goal,
                         ),

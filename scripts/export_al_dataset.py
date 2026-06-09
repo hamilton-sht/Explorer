@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def verifier_status(text):
-    match = re.search(r'Status:\s*["“]?(success|failure)', text or "", re.I)
+    match = re.search(r'Status[*\s]*[:：][*\s]*["“]?(success|failure)', text or "", re.I)
     return match.group(1).lower() if match else "unknown"
 
 

@@ -33,7 +33,7 @@ def _decode_action_text(action):
 
 
 def verifier_status(verifier_response):
-    match = re.search(r'Status:\s*["“]?(success|failure)', verifier_response or "", re.I)
+    match = re.search(r'Status[*\s]*[:：][*\s]*["“]?(success|failure)', verifier_response or "", re.I)
     if not match:
         return "unknown"
     return match.group(1).lower()
@@ -439,7 +439,20 @@ class Explorer:
             self.zoom_region_box = None
 
     def get_state(self):
-        raw_png = self.browser_env.page.screenshot(full_page=False)
+        page = self.browser_env.page
+        # CDP fallback: page.screenshot() can hang on document.fonts.ready on
+        # sites with slow/blocked font CDNs. Bypass via CDP Page.captureScreenshot.
+        try:
+            raw_png = page.screenshot(full_page=False, timeout=15000)
+        except Exception as e:
+            msg = str(e).lower()
+            if "fonts" not in msg and "timeout" not in msg:
+                raise
+            import base64 as _b64
+            logging.warning(f"page.screenshot timed out in get_state ({e}); CDP fallback")
+            client = getattr(page, "client", None) or page.context.new_cdp_session(page)
+            result = client.send("Page.captureScreenshot", {"format": "png"})
+            raw_png = _b64.b64decode(result["data"])
         raw_image_obs = np.array(Image.open(io.BytesIO(raw_png)).convert("RGB"))
         agent_image_obs = self.apply_zoom_to_observation(raw_image_obs)
 
@@ -471,7 +484,7 @@ class Explorer:
         task_trajectory_data["data_type"] = self.args.data_type
         task_trajectory_data["source_dataset"] = self.args.source_dataset
         task_trajectory_data["benchmark_family"] = self.args.benchmark_family
-        task_trajectory_data["instruction"] = getattr(self.args, "task", None)
+        task_trajectory_data["instruction"] = None
         task_trajectory_data["resolution"] = viewport_size
         task_trajectory_data["coordinate_space"] = COORDINATE_SPACE
         task_trajectory_data["screen_size"] = viewport_size
@@ -482,7 +495,7 @@ class Explorer:
         task_trajectory_data["task"] = {
             "task_id": trajectory_id,
             "feasibility": "true",
-            "instruction": getattr(self.args, "task", None),
+            "instruction": None,
             "start_url": self.args.init_url,
         }
         task_trajectory_data["observation_refs"] = []
@@ -498,8 +511,7 @@ class Explorer:
         original_task = None
         step = 0
         execution_id = 0
-        forced_task = getattr(self.args, "task", None)
-        refined_goal = forced_task if forced_task else None
+        refined_goal = None
 
         try:
             while step < self.args.max_steps and execution_id <= 2:
@@ -519,33 +531,32 @@ class Explorer:
 
                 # get state of the environment
                 if self.browser_env.page is not None:
-                    try:
-                        browser_env_state = self.get_state()
-                    except:
-                        logging.info(
-                            "Error in getting state, resetting the environment..."
-                        )
-                        traceback.print_exc()
-                        logging.info(traceback.format_exc())
-                        # reset the environment (best-effort, bounded by execution_id <= 2)
+                    state_attempt = 0
+                    browser_env_state = None
+                    while state_attempt < 3:
                         try:
-                            self.browser_env.setup(self.args.init_url)
-                        except Exception as setup_err:
-                            logging.error(
-                                f"setup retry failed, aborting trajectory: {setup_err}"
-                            )
-                            logging.error(traceback.format_exc())
+                            browser_env_state = self.get_state()
                             break
-
-                        task_trajectory_data["actions"] = []
-                        task_refinement_history = []
-                        action_history = []
-                        action_screenshot_history = []
-                        refiner_image_history = []
-                        original_task = None
-                        step = 0
-                        execution_id += 1
-                        continue
+                        except Exception as state_err:
+                            state_attempt += 1
+                            logging.warning(
+                                f"get_state() failed (attempt {state_attempt}/3): {state_err}"
+                            )
+                            logging.info(traceback.format_exc())
+                            # Wait briefly for any in-flight navigation to settle,
+                            # then retry without wiping the trajectory.
+                            try:
+                                self.browser_env.page.wait_for_load_state(
+                                    "domcontentloaded", timeout=5000
+                                )
+                            except Exception:
+                                pass
+                    if browser_env_state is None:
+                        # Hard failure after 3 retries — keep what we have and stop.
+                        logging.error(
+                            "get_state() failed 3 times; ending trajectory with current actions intact"
+                        )
+                        break
 
                     current_url_before = browser_env_state["page"].url
                     # action['html_before'] = browser_env_state['html']
@@ -590,7 +601,7 @@ class Explorer:
                         logging.info("Captcha detected. Terminating the traj.")
                         return [], "Captcha detected", False
 
-                if step == 0 and not forced_task:
+                if step == 0:
                     response, pred, is_action_valid = self.task_proposal_agent.act(
                         browser_env_state["agent_image_obs"]
                     )
@@ -613,8 +624,14 @@ class Explorer:
                     pred["task"],
                 )
                 step_answer = pred.get("answer", "") if isinstance(pred, dict) else ""
-                if forced_task:
-                    refined_goal = forced_task
+                # If refiner/proposal parser failed, do NOT let the "regex fail"
+                # sentinel propagate as a real goal — fall back to the last good one.
+                # Otherwise the agent literally types "regex fail" into the page and
+                # the relabel step happily packages that nonsense as the new task.
+                if refined_goal == "regex fail":
+                    refined_goal = original_task or (
+                        task_refinement_history[-1] if task_refinement_history else "regex fail"
+                    )
                 if step_answer and new_action_grounded in ("stop", "stop()"):
                     new_action_nl = f"{new_action_nl} | FINAL ANSWER: {step_answer}"
                 if original_task is None and refined_goal != "regex fail":
@@ -633,7 +650,6 @@ class Explorer:
                 if (
                     new_action_grounded in ("stop", "stop()")
                     and not step_answer
-                    and not forced_task
                     and len(task_trajectory_data["actions"]) < self.args.min_actions_before_stop
                 ):
                     logging.info(
@@ -758,12 +774,48 @@ class Explorer:
 
         # Verify against the summarized intent so long trajectories are judged
         # by the task actually implied by the full action sequence.
-        # However: if a task was given (Track B / task-following), always use
-        # that as the verifier intent so it cannot drift to the agent's behavior.
-        # Also honor --verifier-intent-source for the no-task case.
-        if forced_task:
-            user_intent = forced_task
-        elif getattr(self.args, "verifier_intent_source", "original") == "original" and original_task:
+        # Determine the verifier intent.
+        # - Natural termination (agent issued answer/stop within budget):
+        #     use the proposal task as written.
+        # - Budget exhausted (no answer/stop): RELABEL the task to what
+        #     the agent actually accomplished, using the summarization output.
+        #     This yields valid short-horizon training data instead of failure.
+        last_action_grounded = ""
+        if task_trajectory_data.get("actions"):
+            last_action_grounded = (
+                task_trajectory_data["actions"][-1].get("new_action_grounded", "") or ""
+            )
+        agent_terminated_naturally = (
+            last_action_grounded in ("stop", "stop()")
+            or last_action_grounded.startswith("answer(")
+        )
+        n_substantive = sum(
+            1
+            for a in task_trajectory_data.get("actions", [])
+            if not (a.get("new_action_grounded", "") or "").startswith(
+                ("scroll", "wait", "stop", "answer")
+            )
+        )
+        budget_hit_relabel = (
+            not agent_terminated_naturally
+            and n_substantive >= 2  # at least 2 real interactions to be worth relabeling
+            and summarization_pred
+            and summarization_pred != "regex fail"
+            and "regex fail" not in (summarization_pred or "").lower()
+            and len(summarization_pred or "") >= 20  # nonsense is usually short
+        )
+
+        if budget_hit_relabel:
+            logging.info(
+                f"Budget exhausted without natural termination. Relabeling task: "
+                f"{original_task!r} -> {summarization_pred!r}"
+            )
+            user_intent = summarization_pred
+            original_task = summarization_pred  # so downstream sees relabeled
+        elif (
+            getattr(self.args, "verifier_intent_source", "original") == "original"
+            and original_task
+        ):
             user_intent = original_task
         else:
             user_intent = summarization_pred
@@ -808,13 +860,23 @@ class Explorer:
             screenshot_history = [
                 os.path.join(ex_log_dir, f"screenshot_{i}.png") for i in range(step + 1)
             ] + [img_path]
-            verifier_agent_response = self.verifier_agent.act(
-                user_intent, history, screenshot_history, last_page_md
-            )
+            try:
+                verifier_agent_response = self.verifier_agent.act(
+                    user_intent, history, screenshot_history, last_page_md
+                )
+            except Exception as verifier_err:
+                logging.error("verifier crashed: %s", verifier_err)
+                logging.info(traceback.format_exc())
+                verifier_agent_response = "Thoughts: verifier crashed.\nStatus: unknown"
         else:
-            verifier_agent_response = self.verifier_agent.act(
-                user_intent, history, img_path, last_page_md
-            )
+            try:
+                verifier_agent_response = self.verifier_agent.act(
+                    user_intent, history, img_path, last_page_md
+                )
+            except Exception as verifier_err:
+                logging.error("verifier crashed: %s", verifier_err)
+                logging.info(traceback.format_exc())
+                verifier_agent_response = "Thoughts: verifier crashed.\nStatus: unknown"
 
         logging.info("verifier_agent_response = {}".format(verifier_agent_response))
 
@@ -864,6 +926,14 @@ class Explorer:
                 cert = {"raw": self.args.certificate_json}
         # Always include the summarization for downstream tooling, but as auxiliary info.
         cert.setdefault("aux_summarization_response", summarization_response)
+        # Note whether the task was relabeled from proposal -> summarization
+        # (this happens on Track A when the agent ran out of budget without
+        # answer/stop, but did real work worth keeping as training data).
+        if budget_hit_relabel:
+            cert["relabeled"] = True
+            cert["relabel_reason"] = "budget_exhausted_no_natural_termination"
+        else:
+            cert["relabeled"] = False
         task_trajectory_data["certificate"] = cert
         task_trajectory_data["verifier"] = task_trajectory_data["final"]["verifier"]
         task_trajectory_data["license"] = "unknown"
@@ -927,7 +997,7 @@ def main(args):
             "setup_error": True,
             "trajectory_id": os.path.basename(os.path.abspath(args.model_dir)),
             "init_url": args.init_url,
-            "instruction": getattr(args, "task", None),
+            "instruction": None,
             "actions": [],
             "steps": [],
             "observation_refs": [],
@@ -936,9 +1006,27 @@ def main(args):
             json.dump(stub, f, indent=4)
         return
 
-    task_trajectory_data, verifier_agent_response, is_traj_success = flow.run(
-        args.model_dir
-    )
+    try:
+        task_trajectory_data, verifier_agent_response, is_traj_success = flow.run(
+            args.model_dir
+        )
+    except Exception as run_err:
+        # Last-resort safety net: never leave the task without a JSON on disk.
+        logging.error("flow.run() crashed unexpectedly: %s", run_err)
+        logging.info(traceback.format_exc())
+        stub = {
+            "run_error": True,
+            "error_message": str(run_err),
+            "trajectory_id": os.path.basename(os.path.abspath(args.model_dir)),
+            "init_url": args.init_url,
+            "instruction": None,
+            "actions": [],
+            "steps": [],
+            "observation_refs": [],
+        }
+        with open(os.path.join(args.model_dir, "task_trajectory_data.json"), "w") as f:
+            json.dump(stub, f, indent=4)
+        return
 
     if not is_traj_success:
         return
@@ -972,12 +1060,6 @@ if __name__ == "__main__":
         type=str,
         default="https://www.amazon.com/",
         help="initial url for the browser env",
-    )
-    parser.add_argument(
-        "--task",
-        type=str,
-        default=None,
-        help="If set, skip TaskProposalAgent and use this fixed task instruction (task-following mode).",
     )
     parser.add_argument(
         "--certificate-json",

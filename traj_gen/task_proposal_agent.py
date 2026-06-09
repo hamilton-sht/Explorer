@@ -46,7 +46,13 @@ class TaskProposalAgent:
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
     2. The action should be an atomic action from the given visual function vocabulary.
-    3. All x/y coordinates are image-pixel coordinates from the screenshot. Use the center of the visible target.
+    3. **COORDINATES ARE ABSOLUTE PIXELS (NOT NORMALIZED)**. The screenshot is 1920 x 1080 pixels. x ∈ [0, 1920], y ∈ [0, 1080]. Use the center of the visible target.
+       ✓ CORRECT: `click(960, 540)` — clicks the screen center
+       ✓ CORRECT: `click(345.7, 88.0)` — fractional pixels are fine
+       ✗ WRONG: `click(0.5, 0.5)` — these are normalized [0,1], they will click pixel (0, 0)
+       ✗ WRONG: `click(0.277, 0.965)` — also normalized, will hit top-left corner
+       ✗ WRONG: `click(500, 1000)` for normalized [0,1000] — that's the Qwen-VL format, NOT used here
+       If you see numbers like 0.277 in your action, you are wrong — multiply by 1920 / 1080 to get pixels.
     4. The grounded action must be exactly one function call from the action space, with no element IDs, no square-bracket syntax, and no extra text.
     5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed.
     6. You should issue `stop()` if the current webpage asks to login or for credit card information.
@@ -63,7 +69,7 @@ class TaskProposalAgent:
     6. The task should be feasible to complete by a real user and should not require any additional information that is not available on the website.
     7. **The task MUST have a concrete verifiable target** — at least one of: a specific number/date/price visible on a page, a specific page reached (e.g. "Privacy Policy page"), a form filled with given values, or a specific product added to cart. Avoid pure "Read / Browse / Explore / Learn about" tasks that have no checkable endpoint.
     8. **The task MUST be solvable within ~20 atomic actions** using only the visual action space on this website. Do NOT propose tasks requiring: external search engines, bookmarks, file downloads to a specific folder, CAPTCHA, login/registration, payment processing, multi-day booking flows, or features that don't exist on this site.
-    9. **The task MUST be reachable from the current homepage via visible navigation** (top nav, search box, footer links). If you don't see a clear path from the current screenshot, choose a different task that you DO see a path to.
+    9. **The task MUST be reachable from the current page** using only the visible UI (nav, search, content links, footer). Describe WHAT to find, not HOW to navigate — do NOT bake a specific menu path or step sequence into the task instruction (e.g. write "Find the contact phone number for the Sefton parking permits office" rather than "Navigate to Council Services > Parking > Permits and find the phone number"). Let the agent choose the path.
 
     The output should be in below format:
     *OUTPUT FORMAT*: Please give a short analysis of the screenshot, then put your answer within ``` ```, for example, "In summary, the proposed task and the corresponding action is: ```{{"task": <TASK>:str, "action_in_natural_language":<ACTION_IN_NATURAL_LANGUAGE>:str, "grounded_action": "click(320,180)"}}```"

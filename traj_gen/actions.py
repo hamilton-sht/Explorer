@@ -1072,7 +1072,7 @@ def execute_mouse_hover(left: float, top: float, page: Page) -> None:
     viewport_size = page.viewport_size
     assert viewport_size
     page.mouse.move(
-        left, top
+        float(left), float(top)
     )
 
 
@@ -1082,7 +1082,7 @@ async def aexecute_mouse_hover(left: float, top: float, page: APage) -> None:
     viewport_size = page.viewport_size
     assert viewport_size
     await page.mouse.move(
-        left, top
+        float(left), float(top)
     )
 
 
@@ -1094,7 +1094,7 @@ def execute_mouse_click(left: float, top: float, page: Page) -> None:
     # print('left = ', left, 'top = ', top)
 
     page.mouse.click(
-        left, top
+        float(left), float(top)
     )
 
 
@@ -1102,23 +1102,23 @@ def execute_mouse_click(left: float, top: float, page: Page) -> None:
 def execute_mouse_double_click(left: float, top: float, page: Page) -> None:
     viewport_size = page.viewport_size
     assert viewport_size
-    page.mouse.dblclick(left, top)
+    page.mouse.dblclick(float(left), float(top))
 
 
 @beartype
 def execute_mouse_right_click(left: float, top: float, page: Page) -> None:
     viewport_size = page.viewport_size
     assert viewport_size
-    page.mouse.click(left, top, button="right")
+    page.mouse.click(float(left), float(top), button="right")
 
 
 @beartype
 def execute_drag(x1: float, y1: float, x2: float, y2: float, page: Page) -> None:
     viewport_size = page.viewport_size
     assert viewport_size
-    page.mouse.move(x1, y1)
+    page.mouse.move(float(x1), float(y1))
     page.mouse.down()
-    page.mouse.move(x2, y2, steps=10)
+    page.mouse.move(float(x2), float(y2), steps=10)
     page.mouse.up()
 
 

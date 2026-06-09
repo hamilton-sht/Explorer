@@ -14,19 +14,19 @@ class TaskSummarizationAgent:
     def __init__(self, args, browser_env, image_processor):
         self.args = args
 
-        self.sm = """Given a list of actions performed on the website {website_url} and the corresponding screenshots ACTION_LIST: [{action_list}] Your task is to come up with a single task description that will be accomplished by performing these actions in the given sequence on the website. 
+        self.sm = """Given a list of actions performed on the website {website_url} and the corresponding screenshots ACTION_LIST: [{action_list}] Describe the MOST AMBITIOUS TASK that this trajectory SUCCESSFULLY COMPLETED, based on what is verifiable in the screenshots.
 
 *IMPORTANT*
-0. The task must contain some actions: "Buy, Book, Find, Check, Choose, show me, search, browse, get, compare, view, give me, add to cart, ...', ideally involving transactions/finding information on a specific product or service.
-1. You should propose tasks that are clear and specific
-2. The task description should provide all the necessary information to complete the task.
-3. The task description must indicate the domain of website at the end of the task with format: "... on task_website", for instance, "Purchase a laptop on amazon", "Book a hair appointment on yelp", etc.
-4. The task should be feasible to complete by a real user and should not require any additional information that is not specified in this input.
-5. The task description should specify constraints like given budget, product features, and other specifications that can narrow down the search to a particular item/product
-6. Do NOT use any quotation marks (either single or double) in the task description.
+1. Use only POSITIVE, ACHIEVED outcomes. Describe what the trajectory reached — a section opened, a form field filled, a page navigated to, a value located, a modal displayed.
+2. Do NOT mention failed attempts, missing steps, or unreached targets. If a click did not produce navigation, do not mention that click. If a form was filled but not submitted, describe the task as "fill in the field", NOT "submit the form". If a calendar arrow was clicked but the month did not change, leave out the calendar navigation entirely.
+3. The described task must be verifiable by looking at the final screenshot — the final state should be a clear evidence that the task was completed.
+4. Do NOT use outcome verbs that imply completion the agent did not reach (e.g. do not say "Subscribe", "Book", "Purchase", "Complete checkout" if the agent only opened the form). Prefer verbs that match what was actually achieved: Open, Reach, Locate, Select, Enter (into a field), Navigate to, View, Display.
+5. End with "... on task_website", e.g. "... on amazon.com".
+6. Do NOT use any quotation marks (single or double) in the description.
+7. Keep it to ONE sentence.
 
 The output should be in below format:
-*OUTPUT FORMAT*: Please first give some analysis of the actions and screenshots and then output the overall task description. put your answer within ``` ```, for example, "In summary, the answer is: ```<TASK_DESCRIPTION>:str```".
+*OUTPUT FORMAT*: Please first give some analysis of the actions and screenshots and then output the task description. Put your answer within ``` ```, for example, "In summary, the answer is: ```<TASK_DESCRIPTION>:str```".
 
 """
         self.sm_abstract = """Given a web based task description, suggest a way to modify it to make it more abstract. You should mimic the thought process of a human user to come up with an intent that a real user has in mind before attempting the task."""

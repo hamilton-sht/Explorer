@@ -106,6 +106,7 @@ class ScriptBrowserEnv:
         context_kwargs: dict[str, Any] = {
             "viewport": viewport_size,
             "device_scale_factor": 1,
+            "ignore_https_errors": True,
         }
         auth_name = getattr(self.args, "auth_name", None)
         if auth_name:
@@ -125,7 +126,7 @@ class ScriptBrowserEnv:
         page.client = client  # type: ignore
 
         try:
-            page.goto(url, wait_until="commit", timeout=60000)
+            page.goto(url, wait_until="commit", timeout=30000)
         except Exception as e:
             logging.error(traceback.format_exc())
             raise e

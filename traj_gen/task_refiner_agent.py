@@ -31,10 +31,11 @@ class TaskRefinerAgent:
     4. Update the details of the task, such price, date, location, etc. based on the current set of actions and the proposed action.
     5. The updated task must remain solvable. It should be possible to complete the task using the available website/app interface, and it should not require finding an item, product, service, or option that does not exist.
 
-    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [element ID] [content]`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
+    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [element ID] [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
     Action output should follow the syntax as given below:
     `click [element ID]`: This action clicks on an element with a specific id on the webpage.
-    `type [element ID] [content]`: Use this to type the content into the field with id. By default, the "Enter" key is pressed after typing. Both the content and the id should be within square braces as per the syntax.
+    `type [element ID] [content]`: Use this to type the content into the field with id. This action only types text and does not press Enter. Both the content and the id should be within square braces as per the syntax.
+    `enter`: Press the Enter key. Use this as a separate action after typing when submitting a search or form requires Enter.
     `select [element ID] [content of option to select]`: Select an option from a dropdown menu. The content of the option to select should be within square braces. When you get (select and option) tags from the accessibility tree , you need to select the serial number (element_id) corresponding to the select tag , not the option, and select the most likely content corresponding to the option as input.
     `scroll [down]`: Scroll the page down. 
     `scroll [up]`: Scroll the page up.
@@ -43,12 +44,12 @@ class TaskRefinerAgent:
 
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
-    2. The action should be an atomic action from the given action space - click, type, scroll (up or down) or stop
-    3. The arguments to each action should be within square braces. For example, "click [127]", "type [43] [content to type]", "scroll [up]", "scroll [down]".
+    2. The action should be an atomic action from the given action space - click, type, enter, scroll (up or down) or stop
+    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [43] [content to type]", "enter", "scroll [up]", "scroll [down]".
     4. The natural language form of action (corresponding to the field "action_in_natural_language") should be consistent with the grounded version of the action (corresponding to the field "grounded_action"). Do NOT add any additional information in the grounded action. For example, if a particular element ID is specified in the grounded action, a description of that element must be present in the natural language action. 
     5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed. 
     6. You should issue a “stop” action if the current webpage asks to login or for credit card information. 
-    7. To input text, there is NO need to click textbox first, directly type content. After typing, the system automatically hits the `ENTER` key.
+    7. To input text, there is NO need to click textbox first, directly type content. If you need to submit after typing, output `enter` as the next separate action.
     8. STRICTLY Avoid repeating the same action (click/type) if the webpage remains unchanged. You may have selected the wrong web element.
     9. If you cannot identify a valid visible text input or search box in the current parsed HTML/accessibility tree, do not output a type action. Use click or scroll instead.
     10. Do NOT use quotation marks in the action generation.
@@ -56,6 +57,38 @@ class TaskRefinerAgent:
     The output should be in below format:
     *OUTPUT FORMAT*: Please give a short analysis of the screenshot, parsed HTML/accessibility tree, and history, then put your answer within ``` ```, for example, "In summary, the proposed task and the corresponding action is: ```{{"task": <TASK>:str, "action_in_natural_language":<ACTION_IN_NATURAL_LANGUAGE>:str, "grounded_action": <ACTION>:str}}```"
     """
+
+    # Task-following variant: used when args.task is set. The overall task is
+    # FIXED — agent must NOT rewrite it. Information seeking is allowed. When
+    # the task asks for a piece of information, the agent should issue stop
+    # and put the answer in the `answer` field of the JSON output.
+    sm_task_following = """You are an expert web navigation agent. Your overall task is FIXED and given below:
+
+OVERALL TASK: {overall_task}
+
+You are given the webpage screenshot, parsed HTML/accessibility tree, and the list of actions you have already performed: {prev_action_list}.
+
+Your job: pick the NEXT single atomic action that makes progress on the overall task.
+
+*ACTION SPACE*: [`click [element ID]`, `type [element ID] [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, `stop`].
+
+*RULES*:
+1. Do NOT modify or rewrite the overall task. Output the SAME task verbatim in the "task" field every step.
+2. The action must be a single atomic action from the action space.
+3. **STOP CRITERION**: Only issue `stop` with an answer when the SPECIFIC information requested is currently VISIBLE in the screenshot. Do NOT stop on the homepage just because the topic seems related. Do NOT invent or paraphrase content that isn't displayed. If the answer is plainly visible on the homepage (banner/headline/main content), stop immediately on step 0 or 1 — do not over-explore.
+4. **Anti-hallucination — VERY IMPORTANT**: When you write a FINAL ANSWER, every fact in it must come DIRECTLY from text you can read in the latest screenshot. Do not use background knowledge. Do not say "based on visible content" if the content isn't actually there. If unsure, KEEP NAVIGATING — click into menus, sections, or sub-pages.
+5. **For information-seeking tasks**: when the page text/visible content already shows the answer, issue `stop` with the FULL answer string in the "answer" field — quote the exact text from the page.
+6. **For multi-step navigation tasks**: complete all listed steps then stop.
+7. Don't get stuck — if a path doesn't work after 3-4 actions, try a different path (search box, top nav, footer, sitemap).
+8. **Step budget awareness**: If you have already taken 20+ actions, this is your last chance — issue `stop` on the next action with your best partial answer based on what you have seen so far. Do NOT continue exploring past 25 actions.
+9. STRICTLY avoid repeating the same action if the page didn't change — try a different element or strategy.
+10. If a content type input is selected, write the actual text to type in the natural language action and grounded action.
+11. If a login or credit card page appears, issue `stop`.
+12. **CRITICAL**: Whenever you issue `stop` on an information-seeking task, the "answer" field must be NON-EMPTY and the content must be DIRECTLY READABLE in the current screenshot. An answer not grounded in the visible page = failure.
+
+*OUTPUT FORMAT*: Brief analysis, then JSON within ``` ```, e.g.:
+```{{"task": <TASK>, "action_in_natural_language": <ACTION_NL>, "grounded_action": <ACTION>, "answer": <OPTIONAL_ANSWER>}}```
+"""
 
     def act(self, acc_tree, image_obs, action_history, refined_goal, image_history=None):
         is_action_valid = True
@@ -159,8 +192,16 @@ class TaskRefinerAgent:
             }
         ]
 
-        for idx, history_image in enumerate(image_history or []):
-            label = "Initial screenshot" if idx == 0 else f"Recent screenshot {idx}"
+        history_list = image_history or []
+        total_prev = max(len(history_list) - 1, 0)
+        for idx, history_image in enumerate(history_list):
+            if idx == 0:
+                label = "Initial screenshot (episode start)"
+            else:
+                label = (
+                    f"Previous screenshot {idx} of {total_prev} "
+                    "(ordered oldest → newest; the Current screenshot below is the latest)"
+                )
             prompt.extend(
                 [
                     {"type": "text", "text": f"{label}:"},
@@ -181,13 +222,16 @@ class TaskRefinerAgent:
             ]
         )
 
+        is_task_following = bool(getattr(self.args, "task", None))
+        system_prompt = self.sm_task_following if is_task_following else self.sm
+
         messages = [
             {
                 "role": "system",
                 "content": [
                     {
                         "type": "text",
-                        "text": self.sm.format(
+                        "text": system_prompt.format(
                             prev_action_list=action_history,
                             overall_task=self.refined_goal,
                         ),

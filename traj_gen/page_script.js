@@ -137,7 +137,7 @@ var MultimodalWebSurfer = MultimodalWebSurfer || (function() {
         if (element.hasAttribute("id")) {
             let label_id = element.getAttribute("id");
             let label = "";
-            let labels = document.querySelectorAll("label[for='" + label_id + "']");
+            let labels = document.querySelectorAll("label[for=" + JSON.stringify(label_id) + "]");
             for (let j=0; j<labels.length; j++) {
                 label += labels[j].innerText + " ";
             }

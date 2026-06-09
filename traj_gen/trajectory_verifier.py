@@ -17,11 +17,17 @@ class TrajectoryVerifierAgent:
 
 There are three types of tasks:
 1. Transaction: The user wants to perform a transaction on the webpage, such as booking a ticket, ordering a product, etc. The bot should at least initiate the add-to-cart or checkout process. It is still a success if the bot has done actions of 'add to cart' or checkout and encounters the login page.  If the bot fails to do so, the task is considered a failure.
-2. Information seeking: The user wants to obtain certain information from the webpage, such as the information of a product, reviews, map info, comparison of map routes, etc. The bot's response must contain the information the user wants, or explicitly state that the information is not available. Otherwise, e.g. the bot encounters an exception and respond with the error content, the task is considered a failure. Besides, be careful about the sufficiency of the agent's actions. For example, when asked to list the top-searched items in a shop, the agent should order the items by the number of searches, and then return the top items. If the ordering action is missing, the task is likely to fail.
+2. Information seeking: The user wants to obtain certain information from the webpage. Count as **success** if EITHER:
+   (a) the agent's final action contains "FINAL ANSWER: <text>" and the answer is factually consistent with the visible page content, OR
+   (b) the final webpage screenshot/text clearly displays the requested information on screen (even if the agent did not articulate an answer), OR
+   (c) the agent has navigated to the section of the website that authoritatively contains the answer (e.g. a "Pricing" page when asked about price, a "Hazards" page when asked about hazards), AND the screenshot shows the relevant content.
+   Count as **failure** if: the bot's final answer (FINAL ANSWER) is factually wrong, OR the agent ended on an irrelevant/error page, OR the agent gave up without reaching content related to the task.
+   Be careful about hard constraints in the task (e.g. "at least 5 items", "for the year 2023") — partial answers covering most but not all required facts still count as success unless the missing piece is the core of the task.
 3. Site navigation: The user wants to navigate to a specific page. Carefully examine the bot's action history and the final state of the webpage to determine whether the bot successfully completes the task. No need to consider the bot's response.
 4. Content modification: The user wants to modify the content of a webpage or configuration. Carefully examine the bot's action history and the final state of the webpage to determine whether the bot successfully completes the task. No need to consider the bot's response.
 
 *IMPORTANT*
+- If the task name and the initial URL are mismatched (e.g. the task asks about Barcelona Aquarium but the URL is valgrind.org), the task is **unsolvable** — count as failure ONLY if the agent kept blindly trying; count as success if the agent correctly stopped early and stated the URL is unrelated.
 - If a product has been added to the bag/cart in the action list but just the purchase is pending, it should be counted as success.
 - If you see the checkout page for the product you want to purchase, it should be counted as success.
 - Format your response into two lines as shown below:

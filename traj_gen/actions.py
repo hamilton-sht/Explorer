@@ -148,7 +148,7 @@ def action2str(
             case ActionTypes.SCROLL:
                 action_str = f"scroll [{action['direction']}]"
             case ActionTypes.KEY_PRESS:
-                action_str = f"press [{action['key_comb']}]"
+                action_str = "enter" if action["key_comb"] == "Enter" else f"press [{action['key_comb']}]"
             case ActionTypes.GOTO_URL:
                 action_str = f"goto [{action['url']}]"
             case ActionTypes.NEW_TAB:
@@ -189,7 +189,7 @@ def action2str(
             case ActionTypes.SCROLL:
                 action_str = f"scroll [{action['direction']}]"
             case ActionTypes.KEY_PRESS:
-                action_str = f"press [{action['key_comb']}]"
+                action_str = "enter" if action["key_comb"] == "Enter" else f"press [{action['key_comb']}]"
             case ActionTypes.GOTO_URL:
                 action_str = f"goto [{action['url']}]"
             case ActionTypes.NEW_TAB:
@@ -1409,10 +1409,6 @@ def execute_action(
                 element_center = obseration_processor.get_element_center(element_id)  # type: ignore[attr-defined]
                 execute_mouse_click(element_center[0], element_center[1], page)
                 execute_type(action["text"], page)
-                
-                # print('before enter')
-                execute_key_press('Enter', page)
-                # print('after enter')
 
             elif action["element_role"] and action["element_name"]:
                 element_role = int(action["element_role"])
@@ -1571,10 +1567,6 @@ async def aexecute_action(
                 element_center = obseration_processor.get_element_center(element_id)  # type: ignore[attr-defined]
                 await aexecute_mouse_click(element_center[0], element_center[1], page)
                 await aexecute_type(action["text"], page)
-                
-                # print('before enter')
-                await aexecute_key_press('Enter', page)
-                # print('after enter')
 
             elif action["element_role"] and action["element_name"]:
                 element_role = int(action["element_role"])
@@ -1822,23 +1814,13 @@ def create_id_based_action(action_str: str) -> Action:
             element_id = match.group(1)
             return create_hover_action(element_id=element_id)
         case "type":
-            # add default enter flag
-            if not (action_str.endswith("[0]") or action_str.endswith("[1]")):
-                action_str += " [1]"
-
-            match = re.search(
-                r"type ?\[(\d+)\] ?\[(.+)\] ?\[(\d+)\]", action_str
-            )
+            match = re.search(r"type ?\[(\d+)\] ?\[(.+?)\](?: ?\[(?:0|1)\])?$", action_str)
             if not match:
                 raise ActionParsingError(f"Invalid type action {action_str}")
-            element_id, text, enter_flag = (
-                match.group(1),
-                match.group(2),
-                match.group(3),
-            )
-            if enter_flag == "1":
-                text += "\n"
+            element_id, text = match.group(1), match.group(2)
             return create_type_action(text=text, element_id=element_id)
+        case "enter":
+            return create_key_press_action(key_comb="Enter")
         case "select":
             match = re.search(r"select ?\[(\d+)\] ?\[(.+)\]", action_str)
 

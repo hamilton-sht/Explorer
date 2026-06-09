@@ -706,7 +706,7 @@ class ImageObservationProcessor(ObservationProcessor):
             # Produce the SoM image, with bounding boxes
             try:
                 # import pdb; pdb.set_trace()
-                screenshot_bytes = page.screenshot()  # full_page=True
+                screenshot_bytes = page.screenshot(timeout=15000)  # full_page=True
                 # screenshot_bytes = page.screenshot()
                 som_bboxes = self.get_page_bboxes(
                     page
@@ -727,7 +727,7 @@ class ImageObservationProcessor(ObservationProcessor):
                 return screenshot_som, content_str
             except:
                 page.wait_for_event("load")
-                screenshot_bytes = page.screenshot()
+                screenshot_bytes = page.screenshot(timeout=15000)
                 som_bboxes = self.get_page_bboxes(page)
                 screenshot_img = Image.open(BytesIO(screenshot_bytes))
                 bbox_img, id2center, content_str = self.draw_bounding_boxes(
@@ -741,10 +741,10 @@ class ImageObservationProcessor(ObservationProcessor):
                 return screenshot_som, content_str
         else:
             try:
-                screenshot = png_bytes_to_numpy(page.screenshot())
+                screenshot = png_bytes_to_numpy(page.screenshot(timeout=15000, full_page=True))
             except:
                 page.wait_for_event("load")
-                screenshot = png_bytes_to_numpy(page.screenshot())
+                screenshot = png_bytes_to_numpy(page.screenshot(timeout=15000, full_page=True))
             return screenshot, ""
 
     def process_new(
@@ -818,7 +818,7 @@ class ImageObservationProcessor(ObservationProcessor):
         # print("id2center: ", id2center)
 
         som_screenshot, visible_rects, rects_above, rects_below = add_set_of_mark(
-            page.screenshot(), rects
+            page.screenshot(timeout=15000), rects
         )
         w, h = som_screenshot.size
 
@@ -843,7 +843,7 @@ class ImageObservationProcessor(ObservationProcessor):
         bboxes_visible_ratio = [[b[0] + b[2]/2, b[1] + b[3]/2, b[2], b[3]] for b in bboxes_visible_ratio]
         """
         """
-        screenshot_bytes = page.screenshot()
+        screenshot_bytes = page.screenshot(timeout=15000)
         # som_screenshot.save('/home/yadonglu/sandbox/data/orca/parsed_html_demo_img_result_mmwebsurfer.png')
         som_screenshot_bytes = BytesIO()
         som_screenshot.save(som_screenshot_bytes, format="PNG")
@@ -889,7 +889,7 @@ class ImageObservationProcessor(ObservationProcessor):
         self.meta_data["obs_nodes_info"] = id2center
 
         # print("id2center: ", id2center)
-        page_screenshot = await page.screenshot()
+        page_screenshot = await page.screenshot(timeout=15000)
         som_screenshot, visible_rects, rects_above, rects_below = add_set_of_mark(
             page_screenshot, rects
         )
@@ -916,7 +916,7 @@ class ImageObservationProcessor(ObservationProcessor):
         bboxes_visible_ratio = [[b[0] + b[2]/2, b[1] + b[3]/2, b[2], b[3]] for b in bboxes_visible_ratio]
         """
         """
-        screenshot_bytes = page.screenshot()
+        screenshot_bytes = page.screenshot(timeout=15000)
         # som_screenshot.save('/home/yadonglu/sandbox/data/orca/parsed_html_demo_img_result_mmwebsurfer.png')
         som_screenshot_bytes = BytesIO()
         som_screenshot.save(som_screenshot_bytes, format="PNG")

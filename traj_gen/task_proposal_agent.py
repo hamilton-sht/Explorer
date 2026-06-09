@@ -22,10 +22,11 @@ class TaskProposalAgent:
     2. Given the webpage screenshot and parsed HTML/accessibility tree, generate the first action towards completing that task (in natural language form).
     3. Given the webpage screenshot, parsed HTML/accessibility tree, and the natural language action, generate the grounded version of that action.
 
-    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [element ID] [content]`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
+    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [element ID] [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
     Action output should follow the syntax as given below:
     `click [element ID]`: This action clicks on an element with a specific id on the webpage.
-    `type [element ID] [content]`: Use this to type the content into the field with id. By default, the "Enter" key is pressed after typing. Both the content and the id should be within square braces as per the syntax. 
+    `type [element ID] [content]`: Use this to type the content into the field with id. This action only types text and does not press Enter. Both the content and the id should be within square braces as per the syntax.
+    `enter`: Press the Enter key. Use this as a separate action after typing when submitting a search or form requires Enter.
     `select [element ID] [content of option to select]`: Select an option from a dropdown menu. The content of the option to select should be within square braces. When you get (select and option) tags from the accessibility tree , you need to select the serial number (element_id) corresponding to the select tag , not the option, and select the most likely content corresponding to the option as input.
     `scroll [down]`: Scroll the page down. 
     `scroll [up]`: Scroll the page up.
@@ -34,12 +35,12 @@ class TaskProposalAgent:
     
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
-    2. The action should be an atomic action from the given vocabulary - click, type, scroll (up or down) or stop
-    3. The arguments to each action should be within square braces. For example, "click [127]", "type [43] [content to type]", "scroll [up]", "scroll [down]".
+    2. The action should be an atomic action from the given vocabulary - click, type, enter, scroll (up or down) or stop
+    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [43] [content to type]", "enter", "scroll [up]", "scroll [down]".
     4. The natural language form of action (corresponding to the field "action_in_natural_language") should be consistent with the grounded version of the action (corresponding to the field "grounded_action"). Do NOT add any additional information in the grounded action. For example, if a particular element ID is specified in the grounded action, a description of that element must be present in the natural language action. 
     5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed. 
     6. You should issue a “stop” action if the current webpage asks to login or for credit card information. 
-    7. To input text, there is NO need to click textbox first, directly type content. After typing, the system automatically hits the `ENTER` key.
+    7. To input text, there is NO need to click textbox first, directly type content. If you need to submit after typing, output `enter` as the next separate action.
     8. STRICTLY Avoid repeating the same action (click/type) if the webpage remains unchanged. You may have selected the wrong web element.
     9. Do NOT use quotation marks in the action generation.
 

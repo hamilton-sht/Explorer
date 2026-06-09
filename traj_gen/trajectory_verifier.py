@@ -27,6 +27,12 @@ There are three types of tasks:
 4. Content modification: The user wants to modify the content of a webpage or configuration. Carefully examine the bot's action history and the final state of the webpage to determine whether the bot successfully completes the task. No need to consider the bot's response.
 
 *IMPORTANT*
+- **Termination signals**: the agent ends a trajectory with either `answer("text")` (task completed) or `stop()` (task is unsolvable on this site).
+- **`stop()` semantics — TREAT CAREFULLY**:
+  - If the final webpage shows a hard blocker that the task asks the agent to interact with (login wall, paywall, CAPTCHA challenge, requires credit card, content removed/404, site explicitly forbids what the task wants), `stop()` is the CORRECT signal → **count as success** because the agent correctly identified infeasibility.
+  - If the URL is structurally unrelated to the task (e.g. task asks about Barcelona Aquarium but URL is valgrind.org), `stop()` is correct → **success**.
+  - If the requested information IS visible on the final page (or clearly reachable from it) and the agent issued `stop()` instead of `answer(...)`, that is a premature give-up → **failure**.
+  - If the agent issued `stop()` after just 1-2 actions without exploring, default to **failure** unless the blocker is unambiguous in the final screenshot.
 - If the task name and the initial URL are mismatched (e.g. the task asks about Barcelona Aquarium but the URL is valgrind.org), the task is **unsolvable** — count as failure ONLY if the agent kept blindly trying; count as success if the agent correctly stopped early and stated the URL is unrelated.
 - If a product has been added to the bag/cart in the action list but just the purchase is pending, it should be counted as success.
 - If you see the checkout page for the product you want to purchase, it should be counted as success.

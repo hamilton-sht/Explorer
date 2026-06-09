@@ -11,6 +11,7 @@ from .captcha_detection_agent import CaptchaDetectionAgent
 from PIL import Image, ImageDraw, ImageFont
 import argparse
 import logging
+import io
 from tqdm import tqdm
 import requests
 from bs4 import BeautifulSoup
@@ -18,6 +19,7 @@ from .browser_env import ScriptBrowserEnv
 from .processors import ImageObservationProcessor
 import re
 from .actions import ActionTypes, create_id_based_action, _id2key
+import numpy as np
 
 logger = logging.getLogger("__main__")
 
@@ -52,35 +54,49 @@ def action_to_protocol(action, bounding_box_coord, viewport_size):
     if action_type in (ActionTypes.CLICK, ActionTypes.MOUSE_CLICK):
         point = center or [float(action["coords"][0]), float(action["coords"][1])]
         return {
-            "name": "click_xy",
+            "name": "click",
             "args": {"x": point[0], "y": point[1]},
-            "text": f"click_xy({point[0]:.2f}, {point[1]:.2f})",
+            "text": f"click({point[0]:.2f}, {point[1]:.2f})",
             "target_actions": [
                 {"name": "click", "args": {"point": point}},
             ],
         }
+    if action_type == ActionTypes.MOUSE_DOUBLE_CLICK:
+        point = [float(action["coords"][0]), float(action["coords"][1])]
+        return {
+            "name": "doubleclick",
+            "args": {"x": point[0], "y": point[1]},
+            "text": f"doubleclick({point[0]:.2f}, {point[1]:.2f})",
+            "target_actions": [{"name": "doubleclick", "args": {"point": point}}],
+        }
+    if action_type == ActionTypes.MOUSE_RIGHT_CLICK:
+        point = [float(action["coords"][0]), float(action["coords"][1])]
+        return {
+            "name": "rightclick",
+            "args": {"x": point[0], "y": point[1]},
+            "text": f"rightclick({point[0]:.2f}, {point[1]:.2f})",
+            "target_actions": [{"name": "rightclick", "args": {"point": point}}],
+        }
+    if action_type == ActionTypes.MOUSE_MOVE:
+        point = [float(action["coords"][0]), float(action["coords"][1])]
+        return {
+            "name": "move",
+            "args": {"x": point[0], "y": point[1]},
+            "text": f"move({point[0]:.2f}, {point[1]:.2f})",
+            "target_actions": [{"name": "move", "args": {"point": point}}],
+        }
     if action_type in (ActionTypes.HOVER, ActionTypes.MOUSE_HOVER):
         point = center or [float(action["coords"][0]), float(action["coords"][1])]
         return {
-            "name": "mouse_hover",
+            "name": "hover",
             "args": {"x": point[0], "y": point[1]},
-            "text": f"mouse_hover({point[0]:.2f}, {point[1]:.2f})",
+            "text": f"hover({point[0]:.2f}, {point[1]:.2f})",
             "target_actions": [
                 {"name": "hover", "args": {"point": point}},
             ],
         }
     if action_type in (ActionTypes.TYPE, ActionTypes.KEYBOARD_TYPE):
         text = _decode_action_text(action)
-        if center:
-            return {
-                "name": "type_xy",
-                "args": {"x": center[0], "y": center[1], "text": text},
-                "text": f"type_xy({center[0]:.2f}, {center[1]:.2f}, {json.dumps(text, ensure_ascii=False)})",
-                "target_actions": [
-                    {"name": "click", "args": {"point": center}},
-                    {"name": "type", "args": {"content": text}},
-                ],
-            }
         return {
             "name": "type",
             "args": {"text": text},
@@ -91,16 +107,6 @@ def action_to_protocol(action, bounding_box_coord, viewport_size):
         }
     if action_type == ActionTypes.SELECT:
         text = action.get("fill_text") or _decode_action_text(action)
-        if center:
-            return {
-                "name": "select_xy",
-                "args": {"x": center[0], "y": center[1], "option": text},
-                "text": f"select_xy({center[0]:.2f}, {center[1]:.2f}, {json.dumps(text, ensure_ascii=False)})",
-                "target_actions": [
-                    {"name": "click", "args": {"point": center}},
-                    {"name": "type", "args": {"content": text}},
-                ],
-            }
         return {
             "name": "select",
             "args": {"option": text},
@@ -111,15 +117,6 @@ def action_to_protocol(action, bounding_box_coord, viewport_size):
         }
     if action_type == ActionTypes.KEY_PRESS:
         key = action["key_comb"]
-        if "+" in key:
-            return {
-                "name": "hotkey",
-                "args": {"key": key},
-                "text": f"hotkey({json.dumps(key, ensure_ascii=False)})",
-                "target_actions": [
-                    {"name": "hotkey", "args": {"key": key}},
-                ],
-            }
         return {
             "name": "press",
             "args": {"key": key},
@@ -128,14 +125,32 @@ def action_to_protocol(action, bounding_box_coord, viewport_size):
                 {"name": "press", "args": {"key": key}},
             ],
         }
+    if action_type == ActionTypes.KEY_UP:
+        key = action["key_comb"]
+        return {
+            "name": "keyup",
+            "args": {"key": key},
+            "text": f"keyup({json.dumps(key, ensure_ascii=False)})",
+            "target_actions": [{"name": "keyup", "args": {"key": key}}],
+        }
+    if action_type == ActionTypes.DRAG:
+        start = [float(action["start_coords"][0]), float(action["start_coords"][1])]
+        end = [float(action["end_coords"][0]), float(action["end_coords"][1])]
+        return {
+            "name": "drag",
+            "args": {"x1": start[0], "y1": start[1], "x2": end[0], "y2": end[1]},
+            "text": f"drag({start[0]:.2f}, {start[1]:.2f}, {end[0]:.2f}, {end[1]:.2f})",
+            "target_actions": [{"name": "drag", "args": {"start": start, "end": end}}],
+        }
     if action_type == ActionTypes.SCROLL:
         direction = "up" if "up" in action["direction"] else "down"
+        amount = float(action.get("amount", 600))
         return {
             "name": "scroll",
-            "args": {"direction": direction, "amount": 600},
-            "text": f"scroll({json.dumps(direction)}, 600)",
+            "args": {"direction": direction, "amount": amount},
+            "text": f"scroll({json.dumps(direction)}, {amount:g})",
             "target_actions": [
-                {"name": "scroll", "args": {"direction": direction, "amount": 600}},
+                {"name": "scroll", "args": {"direction": direction, "amount": amount}},
             ],
         }
     if action_type == ActionTypes.GO_BACK:
@@ -154,9 +169,31 @@ def action_to_protocol(action, bounding_box_coord, viewport_size):
         }
     if action_type == ActionTypes.STOP:
         answer = action.get("answer", "")
-        name = "answer" if answer else "stop"
-        text = f"answer({json.dumps(answer, ensure_ascii=False)})" if answer else "stop()"
-        return {"name": name, "args": {"answer": answer} if answer else {}, "text": text, "target_actions": [{"name": "finished", "args": {"content": answer}}]}
+        # Doc spec: `answer("...")` for completed task; `stop()` for unsolvable task
+        # (login wall, CAPTCHA, content doesn't exist on this site).
+        if answer:
+            return {
+                "name": "answer",
+                "args": {"answer": answer},
+                "text": f"answer({json.dumps(answer, ensure_ascii=False)})",
+                "target_actions": [{"name": "answer", "args": {"content": answer}}],
+            }
+        return {
+            "name": "stop",
+            "args": {},
+            "text": "stop()",
+            "target_actions": [{"name": "stop", "args": {}}],
+        }
+    if action_type == ActionTypes.ZOOM_REGION:
+        box = [float(v) for v in action["box"]]
+        return {
+            "name": "zoom_region",
+            "args": {"x": box[0], "y": box[1], "w": box[2], "h": box[3]},
+            "text": f"zoom_region({box[0]:.2f}, {box[1]:.2f}, {box[2]:.2f}, {box[3]:.2f})",
+            "target_actions": [{"name": "zoom_region", "args": {"box": box}}],
+        }
+    if action_type == ActionTypes.ZOOM_OUT:
+        return {"name": "zoom_out", "args": {}, "text": "zoom_out()", "target_actions": [{"name": "zoom_out", "args": {}}]}
     if action_type == ActionTypes.NONE:
         return {"name": "wait", "args": {}, "text": "wait()", "target_actions": [{"name": "wait", "args": {}}]}
 
@@ -211,14 +248,14 @@ def make_step_record(
     }
 
 
-def safe_screenshot(page, path, fallback_path=None, timeout=15000):
+def safe_screenshot(page, path, fallback_path=None, timeout=15000, full_page=False):
     """Take a screenshot with timeout; if it fails, copy a fallback file if provided.
 
     Returns True if a fresh screenshot was saved, False if we degraded to fallback or
     no file was produced.
     """
     try:
-        page.screenshot(path=path, timeout=timeout, full_page=True)
+        page.screenshot(path=path, timeout=timeout, full_page=full_page)
         return True
     except Exception as e:
         logging.warning(f"screenshot failed for {path}: {e}")
@@ -370,22 +407,49 @@ class Explorer:
         self.verifier_agent = TrajectoryVerifierAgent(args)
 
         self.captcha_detection_agent = CaptchaDetectionAgent(args)
+        self.zoom_region_box = None
+
+    def apply_zoom_to_observation(self, raw_image_obs):
+        if self.zoom_region_box is None:
+            return raw_image_obs
+
+        img = Image.fromarray(raw_image_obs)
+        x, y, w, h = self.zoom_region_box
+        left = max(0, int(round(x)))
+        top = max(0, int(round(y)))
+        right = min(img.width, int(round(x + w)))
+        bottom = min(img.height, int(round(y + h)))
+        if right <= left or bottom <= top:
+            logging.warning("invalid zoom_region_box=%s; using full screenshot", self.zoom_region_box)
+            self.zoom_region_box = None
+            return raw_image_obs
+
+        cropped = img.crop((left, top, right, bottom))
+        resized = cropped.resize(
+            (self.viewport_size["width"], self.viewport_size["height"]),
+            Image.Resampling.LANCZOS,
+        )
+        return np.array(resized.convert("RGB"))
+
+    def update_zoom_state(self, parsed_runtime_action):
+        action_type = parsed_runtime_action["action_type"]
+        if action_type == ActionTypes.ZOOM_REGION:
+            self.zoom_region_box = [float(v) for v in parsed_runtime_action["box"]]
+        elif action_type == ActionTypes.ZOOM_OUT:
+            self.zoom_region_box = None
 
     def get_state(self):
-        som_image_obs, parsed_html_str = self.image_processor.process_new(
-            self.browser_env.page,
-            self.browser_env.page.client,
-            use_id_selector=True,
-            intent=None,
-        )
+        raw_png = self.browser_env.page.screenshot(full_page=False)
+        raw_image_obs = np.array(Image.open(io.BytesIO(raw_png)).convert("RGB"))
+        agent_image_obs = self.apply_zoom_to_observation(raw_image_obs)
 
         html = self.browser_env.page.content()
 
         return {
             "page": self.browser_env.page,
             "client": self.browser_env.page.client,
-            "content_str": parsed_html_str,
-            "image_obs": som_image_obs,
+            "raw_image_obs": raw_image_obs,
+            "agent_image_obs": agent_image_obs,
             "html": html,
         }
 
@@ -483,11 +547,6 @@ class Explorer:
                         execution_id += 1
                         continue
 
-                    if self.args.print_parsed_tree:
-                        logging.info(
-                            "acc_tree = {}".format(browser_env_state["content_str"])
-                        )
-
                     current_url_before = browser_env_state["page"].url
                     # action['html_before'] = browser_env_state['html']
                     with open(
@@ -512,8 +571,6 @@ class Explorer:
                             fallback_path=prev_screenshot_path,
                         )
 
-                        img = Image.fromarray(browser_env_state["image_obs"])
-                        img.save(os.path.join(ex_log_dir, f"screenshot_som_{step}.png"))
                         task_trajectory_data["observation_refs"].append(
                             f"screenshot_{step}.png"
                         )
@@ -535,12 +592,11 @@ class Explorer:
 
                 if step == 0 and not forced_task:
                     response, pred, is_action_valid = self.task_proposal_agent.act(
-                        browser_env_state["content_str"], browser_env_state["image_obs"]
+                        browser_env_state["agent_image_obs"]
                     )
                 else:
                     response, pred, is_action_valid = self.task_refiner_agent.act(
-                        browser_env_state["content_str"],
-                        browser_env_state["image_obs"],
+                        browser_env_state["agent_image_obs"],
                         action_history,
                         refined_goal,
                         image_history=select_refiner_image_history(
@@ -559,26 +615,13 @@ class Explorer:
                 step_answer = pred.get("answer", "") if isinstance(pred, dict) else ""
                 if forced_task:
                     refined_goal = forced_task
-                if step_answer and new_action_grounded == "stop":
+                if step_answer and new_action_grounded in ("stop", "stop()"):
                     new_action_nl = f"{new_action_nl} | FINAL ANSWER: {step_answer}"
                 if original_task is None and refined_goal != "regex fail":
                     original_task = refined_goal
 
-                # get element id from new_action_grounded
-                try:
-                    match = re.search(r"\[(\d+)\]", new_action_grounded)
-                    element_id = match.group(1)
-
-                    # get bbox coordinates from som_id_info
-                    som_id_info = self.image_processor.som_id_info
-                    bounding_box_coord = {
-                        "x": som_id_info[element_id][0],
-                        "y": som_id_info[element_id][1],
-                        "width": som_id_info[element_id][2],
-                        "height": som_id_info[element_id][3],
-                    }
-                except:  # scroll action
-                    bounding_box_coord = None
+                element_id = None
+                bounding_box_coord = None
 
                 logging.info("Agent response: {}".format(response))
 
@@ -588,7 +631,7 @@ class Explorer:
                 logging.info(f"refined_goal: {refined_goal}\n")
 
                 if (
-                    new_action_grounded == "stop"
+                    new_action_grounded in ("stop", "stop()")
                     and not step_answer
                     and not forced_task
                     and len(task_trajectory_data["actions"]) < self.args.min_actions_before_stop
@@ -598,7 +641,7 @@ class Explorer:
                         self.args.min_actions_before_stop,
                     )
                     new_action_nl = "Scroll down to continue exploring relevant public content"
-                    new_action_grounded = "scroll [down]"
+                    new_action_grounded = 'scroll("down", 600)'
                     bounding_box_coord = None
                     is_action_valid = self.browser_env.step(
                         create_id_based_action(new_action_grounded)
@@ -613,14 +656,16 @@ class Explorer:
                         bounding_box_coord,
                         viewport_size,
                     )
+                    if is_action_valid:
+                        self.update_zoom_state(parsed_runtime_action)
                     parsed_action = {
                         "name": protocol_action["name"],
                         "args": protocol_action["args"],
                         "coordinate_space": COORDINATE_SPACE,
                         "screen_size": viewport_size,
                         "source_action": new_action_grounded,
-                        "source_protocol": "explorer_som_ref_v1",
-                        "target_protocol": "ui_tars2_compat_v1",
+                        "source_protocol": "visual_function_v1",
+                        "target_protocol": "visual_function_v1",
                         "target_actions": protocol_action.get("target_actions", []),
                         "migration_status": "ok",
                     }
@@ -651,19 +696,6 @@ class Explorer:
                 task_refinement_history.append(refined_goal)
                 action_history.append(new_action_nl)
 
-                raw_screenshot_path = os.path.join(ex_log_dir, f"screenshot_{step}.png")
-                action_som_path = os.path.join(
-                    ex_log_dir, f"screenshot_action_som_{step}.png"
-                )
-                save_action_som(
-                    raw_screenshot_path,
-                    action_som_path,
-                    bounding_box_coord,
-                    label=element_id if bounding_box_coord is not None else None,
-                    viewport_size=viewport_size,
-                )
-                action["screenshot_action_som"] = os.path.basename(action_som_path)
-
                 # ground / execute the action
                 current_url = current_url_before if browser_env_state else ""
                 next_url = self.browser_env.page.url if self.browser_env.page else current_url
@@ -682,7 +714,7 @@ class Explorer:
                 )
                 task_trajectory_data["steps"].append(step_record)
 
-                if new_action_grounded == "stop":
+                if new_action_grounded in ("stop", "stop()") or new_action_grounded.startswith("answer("):
                     action["URL_after"] = next_url
                     task_trajectory_data["actions"].append(action)
                     completed = True
@@ -693,8 +725,9 @@ class Explorer:
                 if is_action_valid:
                     action["URL_after"] = self.browser_env.page.url
                     task_trajectory_data["actions"].append(action)
-                    action_screenshot_history.append(action_som_path)
-                    refiner_image_history.append(action_som_path)
+                    raw_screenshot_path = os.path.join(ex_log_dir, f"screenshot_{step}.png")
+                    action_screenshot_history.append(raw_screenshot_path)
+                    refiner_image_history.append(raw_screenshot_path)
 
                 logging.info("##############################\n\n")
                 step += 1

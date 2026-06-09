@@ -16,33 +16,43 @@ class TaskProposalAgent:
         self.browser_env = browser_env
         self.image_processor = image_processor
 
-        self.sm = f"""What does this webpage show? Imagine you are real user on this webpage. Given the webpage screenshot and parsed HTML/accessibility tree, please provide a single task that a user might perform on this page and the corresponding first action towards completing that task.
+        self.sm = f"""What does this webpage show? Imagine you are real user on this webpage. Given the webpage screenshot, please provide a single task that a user might perform on this page and the corresponding first action towards completing that task.
     Do the following step by step:
     1. Generate a single task that a user might perform on this webpage. Be creative and come up with diverse tasks
-    2. Given the webpage screenshot and parsed HTML/accessibility tree, generate the first action towards completing that task (in natural language form).
-    3. Given the webpage screenshot, parsed HTML/accessibility tree, and the natural language action, generate the grounded version of that action.
+    2. Given the webpage screenshot, generate the first action towards completing that task (in natural language form).
+    3. Given the webpage screenshot and the natural language action, generate the grounded version of that action.
 
-    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
+    *ACTION SPACE*: Your action space is: [`move(x,y)`, `hover(x,y)`, `click(x,y)`, `doubleclick(x,y)`, `rightclick(x,y)`, `type("text")`, `press("Enter")`, `keyup("shift")`, `scroll("down", 600)`, `wait()`, `go_back()`, `go_forward()`, `navigate("https://allowed.example")`, `zoom_region(x,y,w,h)`, `zoom_out()`, `answer("final answer")`, `stop()`].
     Action output should follow the syntax as given below:
-    `click [element ID]`: This action clicks on an element with a specific id on the webpage.
-    `type [content]`: Use this to type the content into the currently focused field. This action only types text and does not press Enter. The content should be within square braces as per the syntax.
-    `enter`: Press the Enter key. Use this as a separate action after typing when submitting a search or form requires Enter.
-    `select [element ID] [content of option to select]`: Select an option from a dropdown menu. The content of the option to select should be within square braces. When you get (select and option) tags from the accessibility tree , you need to select the serial number (element_id) corresponding to the select tag , not the option, and select the most likely content corresponding to the option as input.
-    `scroll [down]`: Scroll the page down. 
-    `scroll [up]`: Scroll the page up.
+    `move(x,y)`: Move the mouse to image-pixel coordinate (x,y).
+    `hover(x,y)`: Hover at image-pixel coordinate (x,y).
+    `click(x,y)`: Click at image-pixel coordinate (x,y).
+    `doubleclick(x,y)`: Double-click at image-pixel coordinate (x,y).
+    `rightclick(x,y)`: Right-click at image-pixel coordinate (x,y).
+    `type("text")`: Type text into the currently focused field.
+    `press("Enter")`: Press a key.
+    `keyup("shift")`: Release a key.
+    `scroll("down", 600)` / `scroll("up", 600)`: Scroll the page.
+    `wait()`: Wait.
+    `go_back()` / `go_forward()`: Browser history navigation.
+    `navigate("https://allowed.example")`: Navigate to a URL.
+    `zoom_region(x,y,w,h)`: Mark a visual region for closer inspection.
+    `zoom_out()`: Return to the full screenshot.
+    `answer("final answer")`: Finish with a final answer when the task IS completed (information found / form submitted / item added to cart).
+    `stop()`: Terminate when the task is UNSOLVABLE on this site (login wall, CAPTCHA, content does not exist, asks for credit card). Do NOT use `stop()` when you simply haven't found the answer yet — keep exploring.
 
     *IMPORTANT* To be successful, it is important to STRICTLY follow the below rules:
-    
+
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
-    2. The action should be an atomic action from the given vocabulary - click, type, enter, scroll (up or down) or stop
-    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [content to type]", "enter", "scroll [up]", "scroll [down]".
-    4. The natural language form of action (corresponding to the field "action_in_natural_language") should be consistent with the grounded version of the action (corresponding to the field "grounded_action"). Do NOT add any additional information in the grounded action. For example, if a particular element ID is specified in the grounded action, a description of that element must be present in the natural language action. 
-    5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed. 
-    6. You should issue a “stop” action if the current webpage asks to login or for credit card information. 
-    7. To input text, first output `click [element ID]` on the target textbox/search field. In the next step output `type [content]`. If submission is needed, output `enter` as the third separate step. Do not combine click, type, and enter in one action.
+    2. The action should be an atomic action from the given visual function vocabulary.
+    3. All x/y coordinates are image-pixel coordinates from the screenshot. Use the center of the visible target.
+    4. The grounded action must be exactly one function call from the action space, with no element IDs, no square-bracket syntax, and no extra text.
+    5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed.
+    6. You should issue `stop()` if the current webpage asks to login or for credit card information.
+    7. To input text, first output `click(x,y)` on the target textbox/search field. In the next step output `type("content")`. If submission is needed, output `press("Enter")` as the third separate step. Do not combine click, type, and keypress in one action.
     8. STRICTLY Avoid repeating the same action (click/type) if the webpage remains unchanged. You may have selected the wrong web element.
-    9. Do NOT use quotation marks in the action generation.
+    9. Use quotation marks only for string arguments inside function calls.
 
     *  Task proposal rules *
     1. You should propose tasks that are relevant to the website and can be completed using the website.
@@ -52,19 +62,19 @@ class TaskProposalAgent:
     5. The task description should provide all the necessary information to complete the task.
     6. The task should be feasible to complete by a real user and should not require any additional information that is not available on the website.
     7. **The task MUST have a concrete verifiable target** — at least one of: a specific number/date/price visible on a page, a specific page reached (e.g. "Privacy Policy page"), a form filled with given values, or a specific product added to cart. Avoid pure "Read / Browse / Explore / Learn about" tasks that have no checkable endpoint.
-    8. **The task MUST be solvable within ~20 atomic actions** using only click/type/scroll/select on this website. Do NOT propose tasks requiring: external search engines, bookmarks, file downloads to a specific folder, CAPTCHA, login/registration, payment processing, multi-day booking flows, or features that don't exist on this site.
+    8. **The task MUST be solvable within ~20 atomic actions** using only the visual action space on this website. Do NOT propose tasks requiring: external search engines, bookmarks, file downloads to a specific folder, CAPTCHA, login/registration, payment processing, multi-day booking flows, or features that don't exist on this site.
     9. **The task MUST be reachable from the current homepage via visible navigation** (top nav, search box, footer links). If you don't see a clear path from the current screenshot, choose a different task that you DO see a path to.
 
     The output should be in below format:
-    *OUTPUT FORMAT*: Please give a short analysis of the screenshot, parsed HTML/accessibility tree, then put your answer within ``` ```, for example, "In summary, the proposed task and the corresponding action is: ```{{"task": <TASK>:str, "action_in_natural_language":<ACTION_IN_NATURAL_LANGUAGE>:str, "grounded_action": <ACTION>:str}}```"
+    *OUTPUT FORMAT*: Please give a short analysis of the screenshot, then put your answer within ``` ```, for example, "In summary, the proposed task and the corresponding action is: ```{{"task": <TASK>:str, "action_in_natural_language":<ACTION_IN_NATURAL_LANGUAGE>:str, "grounded_action": "click(320,180)"}}```"
 
     """
 
-    def act(self, acc_tree, image_obs):
+    def act(self, image_obs):
         is_action_valid = True
 
         try:
-            messages = self.create_request(acc_tree, image_obs)
+            messages = self.create_request(image_obs)
 
             ans_1st_pass, _ = call_gpt4v(
                 self.args, messages, temperature=self.args.temp_refiner
@@ -148,11 +158,11 @@ class TaskProposalAgent:
 
         return response, pred, is_action_valid
 
-    def create_request(self, acc_tree, image_obs):
+    def create_request(self, image_obs):
         prompt = [
             {
                 "type": "text",
-                "text": f"WEBSITE URL: {self.args.init_url}\n PARSED HTML/ACCESSIBILITY TREE:\n {acc_tree}",
+                "text": f"WEBSITE URL: {self.args.init_url}\nUse only the screenshot to choose a visual action.",
             },
             {
                 "type": "image_url",

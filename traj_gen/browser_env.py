@@ -183,15 +183,20 @@ class ScriptBrowserEnv:
         success = False
         fail_error = ""
 
-        (
-            som_image_obs,
-            parsed_html_str,
-        ) = self.observation_handler.action_processor.process_new(
-            self.page, self.page.client, None
-        )
-
         logging.info("action = {}".format(action))
         logging.info("action = {}".format(action["action_type"]))
+
+        needs_som = action["action_type"] in {
+            ActionTypes.CLICK,
+            ActionTypes.HOVER,
+            ActionTypes.TYPE,
+            ActionTypes.CLEAR,
+            ActionTypes.SELECT,
+        }
+        if needs_som:
+            self.observation_handler.action_processor.process_new(
+                self.page, self.page.client, None
+            )
 
         if action["action_type"] == ActionTypes.SELECT:
             # do the necessary processing to get id2selector

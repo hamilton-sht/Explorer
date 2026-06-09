@@ -1,6 +1,6 @@
 """
 Browser Env action space.
-Inspited by Farama-Foundation/miniwob-plusplus, 
+Inspited by Farama-Foundation/miniwob-plusplus,
 Credit: https://github.com/web-arena-x/visualwebarena/blob/99cbfe98a26049c7ca5fe425dac1769a6619a54c/browser_env/actions.py
 """
 import ast
@@ -120,6 +120,11 @@ class Action(TypedDict):
     pw_code: str
     answer: str
     raw_prediction: str  # raw prediction from the model
+    button: str
+    start_coords: npt.NDArray[np.float32]
+    end_coords: npt.NDArray[np.float32]
+    box: npt.NDArray[np.float32]
+    amount: float
 
 
 @beartype
@@ -337,6 +342,14 @@ class ActionTypes(IntEnum):
     CLEAR = 18
 
     SELECT = 19
+    MOUSE_DOUBLE_CLICK = 20
+    MOUSE_RIGHT_CLICK = 21
+    DRAG = 22
+    KEY_DOWN = 23
+    KEY_UP = 24
+    ZOOM_REGION = 25
+    ZOOM_OUT = 26
+    MOUSE_MOVE = 27
 
     def __str__(self) -> str:
         return f"ACTION_TYPES.{self.name}"
@@ -360,7 +373,7 @@ def is_equivalent(a: Action, b: Action) -> bool:
             return np.allclose(a["coords"], b["coords"])
         case ActionTypes.KEYBOARD_TYPE:
             return a["text"] == b["text"]
-        case ActionTypes.CLICK | ActionTypes.HOVER | ActionTypes.TYPE: 
+        case ActionTypes.CLICK | ActionTypes.HOVER | ActionTypes.TYPE:
             if a["element_id"] and b["element_id"]:
                 return a["element_id"] == b["element_id"]
             elif a["element_role"] and b["element_role"]:
@@ -451,6 +464,10 @@ def get_action_space() -> spaces.Dict:
             "direction": spaces.Text(MAX_VANILLA_STR_LENGTH),
             "pw_code": spaces.Text(MAX_VANILLA_STR_LENGTH),
             "answer": spaces.Text(MAX_ANSWER_LENGTH),
+            "amount": spaces.Box(
+                np.array([0.0], dtype=np.float32),
+                np.array([10000.0], dtype=np.float32),
+            ),
         }
     )
     return space
@@ -489,6 +506,11 @@ def create_random_action() -> Action:
         ),
         "answer": str(np.random.randint(MAX_ANSWER_LENGTH)),
         "raw_prediction": str(np.random.randint(MAX_ANSWER_LENGTH)),
+        "button": "",
+        "start_coords": np.random.rand(2).astype(np.float32),
+        "end_coords": np.random.rand(2).astype(np.float32),
+        "box": np.random.rand(4).astype(np.float32),
+        "amount": float(np.random.randint(10000)),
     }
 
 
@@ -510,6 +532,11 @@ def create_none_action() -> Action:
         "direction": "",
         "answer": "",
         "raw_prediction": "",
+        "button": "",
+        "start_coords": np.zeros(2, dtype=np.float32),
+        "end_coords": np.zeros(2, dtype=np.float32),
+        "box": np.zeros(4, dtype=np.float32),
+        "amount": 0.0,
     }
 
 
@@ -521,7 +548,7 @@ def create_stop_action(answer: str) -> Action:
 
 
 @beartype
-def create_scroll_action(direction: str) -> Action:
+def create_scroll_action(direction: str, amount: float = 600) -> Action:
     """Return the playwright action"""
     assert direction in ["up", "down"]
     action = create_none_action()
@@ -529,6 +556,7 @@ def create_scroll_action(direction: str) -> Action:
         {
             "action_type": ActionTypes.SCROLL,
             "direction": direction,
+            "amount": float(amount),
         }
     )
     return action
@@ -543,6 +571,18 @@ def create_mouse_hover_action(
     action.update(
         {
             "action_type": ActionTypes.MOUSE_HOVER,
+            "coords": np.array([left, top], dtype=np.float32),
+        }
+    )
+    return action
+
+
+@beartype
+def create_mouse_move_action(left: float, top: float) -> Action:
+    action = create_none_action()
+    action.update(
+        {
+            "action_type": ActionTypes.MOUSE_MOVE,
             "coords": np.array([left, top], dtype=np.float32),
         }
     )
@@ -652,14 +692,14 @@ def create_mouse_click_action(
 ) -> Action:
     """Return a valid action object with type COORD_CLICK."""
     action = create_none_action()
-    if left and top:
+    if left is not None and top is not None:
         action.update(
             {
                 "action_type": ActionTypes.MOUSE_CLICK,
                 "coords": np.array([left, top], dtype=np.float32),
             }
         )
-    elif (not left) and (not top):
+    elif left is None and top is None:
         action.update(
             {
                 "action_type": ActionTypes.CLICK,
@@ -667,6 +707,77 @@ def create_mouse_click_action(
         )
     else:
         raise ValueError("left and top must be both None or both not None")
+    return action
+
+
+@beartype
+def create_mouse_double_click_action(left: float, top: float) -> Action:
+    action = create_none_action()
+    action.update(
+        {
+            "action_type": ActionTypes.MOUSE_DOUBLE_CLICK,
+            "coords": np.array([left, top], dtype=np.float32),
+        }
+    )
+    return action
+
+
+@beartype
+def create_mouse_right_click_action(left: float, top: float) -> Action:
+    action = create_none_action()
+    action.update(
+        {
+            "action_type": ActionTypes.MOUSE_RIGHT_CLICK,
+            "coords": np.array([left, top], dtype=np.float32),
+            "button": "right",
+        }
+    )
+    return action
+
+
+@beartype
+def create_drag_action(x1: float, y1: float, x2: float, y2: float) -> Action:
+    action = create_none_action()
+    action.update(
+        {
+            "action_type": ActionTypes.DRAG,
+            "start_coords": np.array([x1, y1], dtype=np.float32),
+            "end_coords": np.array([x2, y2], dtype=np.float32),
+        }
+    )
+    return action
+
+
+@beartype
+def create_key_down_action(key_comb: str) -> Action:
+    action = create_key_press_action(key_comb)
+    action.update({"action_type": ActionTypes.KEY_DOWN})
+    return action
+
+
+@beartype
+def create_key_up_action(key_comb: str) -> Action:
+    action = create_key_press_action(key_comb)
+    action.update({"action_type": ActionTypes.KEY_UP})
+    return action
+
+
+@beartype
+def create_zoom_region_action(x: float, y: float, width: float, height: float) -> Action:
+    action = create_none_action()
+    action.update(
+        {
+            "action_type": ActionTypes.ZOOM_REGION,
+            "box": np.array([x, y, width, height], dtype=np.float32),
+        }
+    )
+    return action
+
+
+@beartype
+def create_zoom_out_action() -> Action:
+    action = create_none_action()
+    action.update({"action_type": ActionTypes.ZOOM_OUT})
     return action
 
 
@@ -886,31 +997,23 @@ def create_focus_and_type_action(
 
 
 @beartype
-def execute_scroll(direction: str, page: Page) -> None:
+def execute_scroll(direction: str, page: Page, amount: float = 600) -> None:
     # perform the action
     # code from natbot
     if direction == "up":
-        page.evaluate(
-            "(document.scrollingElement || document.body).scrollTop = (document.scrollingElement || document.body).scrollTop - window.innerHeight;"
-        )
+        page.mouse.wheel(0, -abs(amount))
     elif direction == "down":
-        page.evaluate(
-            "(document.scrollingElement || document.body).scrollTop = (document.scrollingElement || document.body).scrollTop + window.innerHeight;"
-        )
+        page.mouse.wheel(0, abs(amount))
 
 
 @beartype
-async def aexecute_scroll(direction: str, page: APage) -> None:
+async def aexecute_scroll(direction: str, page: APage, amount: float = 600) -> None:
     # perform the action
     # code from natbot
     if direction == "up":
-        await page.evaluate(
-            "(document.scrollingElement || document.body).scrollTop = (document.scrollingElement || document.body).scrollTop - window.innerHeight;"
-        )
+        await page.mouse.wheel(0, -abs(amount))
     elif direction == "down":
-        await page.evaluate(
-            "(document.scrollingElement || document.body).scrollTop = (document.scrollingElement || document.body).scrollTop + window.innerHeight;"
-        )
+        await page.mouse.wheel(0, abs(amount))
 
 
 @beartype
@@ -922,6 +1025,20 @@ def execute_key_press(key: str, page: Page) -> None:
 
 
 @beartype
+def execute_key_down(key: str, page: Page) -> None:
+    if "Meta" in key and "Mac" not in page.evaluate("navigator.platform"):
+        key = key.replace("Meta", "Control")
+    page.keyboard.down(key)
+
+
+@beartype
+def execute_key_up(key: str, page: Page) -> None:
+    if "Meta" in key and "Mac" not in page.evaluate("navigator.platform"):
+        key = key.replace("Meta", "Control")
+    page.keyboard.up(key)
+
+
+@beartype
 async def aexecute_key_press(key: str, page: APage) -> None:
     """Press a key."""
     if "Meta" in key and "Mac" not in await page.evaluate(
@@ -929,6 +1046,24 @@ async def aexecute_key_press(key: str, page: APage) -> None:
     ):
         key = key.replace("Meta", "Control")
     await page.keyboard.press(key)
+
+
+@beartype
+async def aexecute_key_down(key: str, page: APage) -> None:
+    if "Meta" in key and "Mac" not in await page.evaluate(
+        "navigator.platform"
+    ):
+        key = key.replace("Meta", "Control")
+    await page.keyboard.down(key)
+
+
+@beartype
+async def aexecute_key_up(key: str, page: APage) -> None:
+    if "Meta" in key and "Mac" not in await page.evaluate(
+        "navigator.platform"
+    ):
+        key = key.replace("Meta", "Control")
+    await page.keyboard.up(key)
 
 
 @beartype
@@ -964,6 +1099,30 @@ def execute_mouse_click(left: float, top: float, page: Page) -> None:
 
 
 @beartype
+def execute_mouse_double_click(left: float, top: float, page: Page) -> None:
+    viewport_size = page.viewport_size
+    assert viewport_size
+    page.mouse.dblclick(left, top)
+
+
+@beartype
+def execute_mouse_right_click(left: float, top: float, page: Page) -> None:
+    viewport_size = page.viewport_size
+    assert viewport_size
+    page.mouse.click(left, top, button="right")
+
+
+@beartype
+def execute_drag(x1: float, y1: float, x2: float, y2: float, page: Page) -> None:
+    viewport_size = page.viewport_size
+    assert viewport_size
+    page.mouse.move(x1, y1)
+    page.mouse.down()
+    page.mouse.move(x2, y2, steps=10)
+    page.mouse.up()
+
+
+@beartype
 async def aexecute_mouse_click(left: float, top: float, page: APage) -> None:
     """Click at coordinates (left, top)."""
     viewport_size = page.viewport_size
@@ -971,6 +1130,30 @@ async def aexecute_mouse_click(left: float, top: float, page: APage) -> None:
     await page.mouse.click(
         left, top
     )
+
+
+@beartype
+async def aexecute_mouse_double_click(left: float, top: float, page: APage) -> None:
+    viewport_size = page.viewport_size
+    assert viewport_size
+    await page.mouse.dblclick(left, top)
+
+
+@beartype
+async def aexecute_mouse_right_click(left: float, top: float, page: APage) -> None:
+    viewport_size = page.viewport_size
+    assert viewport_size
+    await page.mouse.click(left, top, button="right")
+
+
+@beartype
+async def aexecute_drag(x1: float, y1: float, x2: float, y2: float, page: APage) -> None:
+    viewport_size = page.viewport_size
+    assert viewport_size
+    await page.mouse.move(x1, y1)
+    await page.mouse.down()
+    await page.mouse.move(x2, y2, steps=10)
+    await page.mouse.up()
 
 
 @beartype
@@ -1242,7 +1425,7 @@ async def aexecute_playwright_check(
 def execute_select_option(action, page, id2selector):
     logging.info(f"action: {action}")
 
-    
+
     # print(tree.element_tag_value)
     # import pdb; pdb.set_trace()
     selector = id2selector[action["element_id"]]
@@ -1254,9 +1437,9 @@ def execute_select_option(action, page, id2selector):
         similarity = SequenceMatcher(None, option, value).ratio()
         if similarity > best_option[2]:
             best_option = [i, option, similarity]
-    
+
     selector.select_option(index=best_option[0], timeout=10000)
-    
+
     """
     try:
         logging.info(f"tree.element_tag_value: {tree.element_tag_value}")
@@ -1283,7 +1466,7 @@ def execute_select_option(action, page, id2selector):
                 var options = optgroup.querySelectorAll('option');
                 for (var option of options) {{
                     values.push(option.innerText);
-                }}   
+                }}
             }}
             return values;
         }}''', selector)
@@ -1339,13 +1522,31 @@ def execute_action(
 
         case ActionTypes.SCROLL:
             direction = "up" if "up" in action["direction"] else "down"
-            execute_scroll(direction, page)
+            execute_scroll(direction, page, action.get("amount", 600))
         case ActionTypes.KEY_PRESS:
             keys = action["key_comb"]
             execute_key_press(keys, page)
+        case ActionTypes.KEY_DOWN:
+            keys = action["key_comb"]
+            execute_key_down(keys, page)
+        case ActionTypes.KEY_UP:
+            keys = action["key_comb"]
+            execute_key_up(keys, page)
 
         case ActionTypes.MOUSE_CLICK:
             execute_mouse_click(action["coords"][0], action["coords"][1], page)
+        case ActionTypes.MOUSE_DOUBLE_CLICK:
+            execute_mouse_double_click(action["coords"][0], action["coords"][1], page)
+        case ActionTypes.MOUSE_RIGHT_CLICK:
+            execute_mouse_right_click(action["coords"][0], action["coords"][1], page)
+        case ActionTypes.DRAG:
+            execute_drag(
+                action["start_coords"][0],
+                action["start_coords"][1],
+                action["end_coords"][0],
+                action["end_coords"][1],
+                page,
+            )
         case ActionTypes.CLEAR:
             element_id = action["element_id"]
             element_center = obseration_processor.get_element_center(element_id)  # type: ignore[attr-defined]
@@ -1353,6 +1554,8 @@ def execute_action(
             execute_key_press("Meta+A", page)
             execute_key_press('Backspace', page)
         case ActionTypes.MOUSE_HOVER:
+            execute_mouse_hover(action["coords"][0], action["coords"][1], page)
+        case ActionTypes.MOUSE_MOVE:
             execute_mouse_hover(action["coords"][0], action["coords"][1], page)
         case ActionTypes.KEYBOARD_TYPE:
             execute_type(action["text"], page)
@@ -1476,6 +1679,10 @@ def execute_action(
                 )
         case ActionTypes.STOP:
             pass # do nothing
+        case ActionTypes.ZOOM_REGION:
+            pass
+        case ActionTypes.ZOOM_OUT:
+            pass
         case _:
             raise ValueError(f"Unknown action type: {action_type}")
 
@@ -1495,14 +1702,36 @@ async def aexecute_action(
             pass
         case ActionTypes.SCROLL:
             direction = "up" if "up" in action["direction"] else "down"
-            await aexecute_scroll(direction, page)
+            await aexecute_scroll(direction, page, action.get("amount", 600))
         case ActionTypes.KEY_PRESS:
             keys = action["key_comb"]
             await aexecute_key_press(keys, page)
+        case ActionTypes.KEY_DOWN:
+            keys = action["key_comb"]
+            await aexecute_key_down(keys, page)
+        case ActionTypes.KEY_UP:
+            keys = action["key_comb"]
+            await aexecute_key_up(keys, page)
 
         case ActionTypes.MOUSE_CLICK:
             await aexecute_mouse_click(
                 action["coords"][0], action["coords"][1], page
+            )
+        case ActionTypes.MOUSE_DOUBLE_CLICK:
+            await aexecute_mouse_double_click(
+                action["coords"][0], action["coords"][1], page
+            )
+        case ActionTypes.MOUSE_RIGHT_CLICK:
+            await aexecute_mouse_right_click(
+                action["coords"][0], action["coords"][1], page
+            )
+        case ActionTypes.DRAG:
+            await aexecute_drag(
+                action["start_coords"][0],
+                action["start_coords"][1],
+                action["end_coords"][0],
+                action["end_coords"][1],
+                page,
             )
         case ActionTypes.CLEAR:
             element_id = action["element_id"]
@@ -1511,6 +1740,10 @@ async def aexecute_action(
             await execute_key_press("Meta+A", page)
             await execute_key_press('Backspace', page)
         case ActionTypes.MOUSE_HOVER:
+            await aexecute_mouse_hover(
+                action["coords"][0], action["coords"][1], page
+            )
+        case ActionTypes.MOUSE_MOVE:
             await aexecute_mouse_hover(
                 action["coords"][0], action["coords"][1], page
             )
@@ -1623,6 +1856,12 @@ async def aexecute_action(
                 raise NotImplementedError(
                     "No proper locator found for select option action"
                 )
+        case ActionTypes.STOP:
+            pass
+        case ActionTypes.ZOOM_REGION:
+            pass
+        case ActionTypes.ZOOM_OUT:
+            pass
 
         case _:
             raise ValueError(f"Unknown action type: {action_type}")
@@ -1777,6 +2016,119 @@ def create_playwright_action(playwright_code: str) -> Action:
 def create_id_based_action(action_str: str) -> Action:
     """Main function to return individual id based action"""
     action_str = action_str.strip()
+
+    def parse_call(expected_name: str):
+        if not action_str.startswith(f"{expected_name}(") or not action_str.endswith(")"):
+            return None
+        try:
+            raw_args = action_str[len(expected_name) + 1:-1].strip()
+            if not raw_args:
+                return ()
+            return ast.literal_eval(f"({raw_args},)")
+        except Exception as exc:
+            raise ActionParsingError(f"Invalid {expected_name} action {action_str}") from exc
+
+    call_match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\(", action_str)
+    if call_match:
+        action = call_match.group(1)
+        match action:
+            case "move":
+                args = parse_call(action)
+                if args is None or len(args) != 2:
+                    raise ActionParsingError(f"Invalid move action {action_str}")
+                return create_mouse_move_action(left=float(args[0]), top=float(args[1]))
+            case "hover":
+                args = parse_call(action)
+                if args is None or len(args) != 2:
+                    raise ActionParsingError(f"Invalid {action} action {action_str}")
+                return create_mouse_hover_action(left=float(args[0]), top=float(args[1]))
+            case "click":
+                args = parse_call(action)
+                if args is None or len(args) != 2:
+                    raise ActionParsingError(f"Invalid click action {action_str}")
+                return create_mouse_click_action(left=float(args[0]), top=float(args[1]))
+            case "doubleclick":
+                args = parse_call(action)
+                if args is None or len(args) != 2:
+                    raise ActionParsingError(f"Invalid doubleclick action {action_str}")
+                return create_mouse_double_click_action(float(args[0]), float(args[1]))
+            case "rightclick":
+                args = parse_call(action)
+                if args is None or len(args) != 2:
+                    raise ActionParsingError(f"Invalid rightclick action {action_str}")
+                return create_mouse_right_click_action(float(args[0]), float(args[1]))
+            case "type":
+                args = parse_call(action)
+                if args is None or len(args) != 1 or not isinstance(args[0], str):
+                    raise ActionParsingError(f"Invalid type action {action_str}")
+                return create_keyboard_type_action(args[0])
+            case "press":
+                args = parse_call(action)
+                if args is None or len(args) != 1 or not isinstance(args[0], str):
+                    raise ActionParsingError(f"Invalid press action {action_str}")
+                return create_key_press_action(key_comb=args[0])
+            case "keydown":
+                args = parse_call(action)
+                if args is None or len(args) != 1 or not isinstance(args[0], str):
+                    raise ActionParsingError(f"Invalid keydown action {action_str}")
+                return create_key_down_action(key_comb=args[0])
+            case "keyup":
+                args = parse_call(action)
+                if args is None or len(args) != 1 or not isinstance(args[0], str):
+                    raise ActionParsingError(f"Invalid keyup action {action_str}")
+                return create_key_up_action(key_comb=args[0])
+            case "scroll":
+                args = parse_call(action)
+                if args is None or len(args) not in (1, 2) or args[0] not in ("up", "down"):
+                    raise ActionParsingError(f"Invalid scroll action {action_str}")
+                amount = float(args[1]) if len(args) == 2 else 600
+                return create_scroll_action(direction=args[0], amount=amount)
+            case "wait":
+                args = parse_call(action)
+                if args is None or len(args) != 0:
+                    raise ActionParsingError(f"Invalid wait action {action_str}")
+                return create_none_action()
+            case "drag":
+                args = parse_call(action)
+                if args is None or len(args) != 4:
+                    raise ActionParsingError(f"Invalid drag action {action_str}")
+                return create_drag_action(float(args[0]), float(args[1]), float(args[2]), float(args[3]))
+            case "go_back":
+                args = parse_call(action)
+                if args is None or len(args) != 0:
+                    raise ActionParsingError(f"Invalid go_back action {action_str}")
+                return create_go_back_action()
+            case "go_forward":
+                args = parse_call(action)
+                if args is None or len(args) != 0:
+                    raise ActionParsingError(f"Invalid go_forward action {action_str}")
+                return create_go_forward_action()
+            case "navigate":
+                args = parse_call(action)
+                if args is None or len(args) != 1 or not isinstance(args[0], str):
+                    raise ActionParsingError(f"Invalid navigate action {action_str}")
+                return create_goto_url_action(url=args[0])
+            case "zoom_region":
+                args = parse_call(action)
+                if args is None or len(args) != 4:
+                    raise ActionParsingError(f"Invalid zoom_region action {action_str}")
+                return create_zoom_region_action(float(args[0]), float(args[1]), float(args[2]), float(args[3]))
+            case "zoom_out":
+                args = parse_call(action)
+                if args is None or len(args) != 0:
+                    raise ActionParsingError(f"Invalid zoom_out action {action_str}")
+                return create_zoom_out_action()
+            case "answer":
+                args = parse_call(action)
+                if args is None or len(args) != 1 or not isinstance(args[0], str):
+                    raise ActionParsingError(f"Invalid answer action {action_str}")
+                return create_stop_action(args[0])
+            case "stop":
+                args = parse_call(action)
+                if args is None or len(args) != 0:
+                    raise ActionParsingError(f"Invalid stop action {action_str}")
+                return create_stop_action("")
+
     if "[" in action_str:
         action = action_str.split("[")[0].strip()
     else:
@@ -1792,7 +2144,7 @@ def create_id_based_action(action_str: str) -> Action:
                 raise ActionParsingError(f"Invalid search_google action {action_str}")
             url = match.group(1)
             url = "https://www.google.com/search?q={}".format(url)
-            
+
             return create_goto_url_action(url=url)
         case "click":
             match = re.search(r"click ?\[(\d+)\]", action_str)
@@ -1833,7 +2185,7 @@ def create_id_based_action(action_str: str) -> Action:
             element_id = match.group(1)
             text = match.group(2)
             return create_select_action(text=text, element_id=element_id)
-        
+
         case "press":
             match = re.search(r"press ?\[(.+)\]", action_str)
             if not match:

@@ -1815,10 +1815,14 @@ def create_id_based_action(action_str: str) -> Action:
             return create_hover_action(element_id=element_id)
         case "type":
             match = re.search(r"type ?\[(\d+)\] ?\[(.+?)\](?: ?\[(?:0|1)\])?$", action_str)
+            if match:
+                element_id, text = match.group(1), match.group(2)
+                return create_type_action(text=text, element_id=element_id)
+            match = re.search(r"type ?\[(.+?)\](?: ?\[(?:0|1)\])?$", action_str)
             if not match:
                 raise ActionParsingError(f"Invalid type action {action_str}")
-            element_id, text = match.group(1), match.group(2)
-            return create_type_action(text=text, element_id=element_id)
+            text = match.group(1)
+            return create_keyboard_type_action(text)
         case "enter":
             return create_key_press_action(key_comb="Enter")
         case "select":

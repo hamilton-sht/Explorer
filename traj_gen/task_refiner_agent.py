@@ -20,21 +20,21 @@ class TaskRefinerAgent:
     Do the following step by step:
     1. Please predict what action the user might perform next that is consistent with the overall task and previous action list in natural language.
     2. Then based on the parsed HTML/accessibility tree of the webpage and the natural language action, generate the grounded action.
-    3. Update the overall task aligned with this set of actions.
+    3. Output the SAME overall task verbatim in the "task" field — DO NOT rewrite, paraphrase, or change the task in any way.
 
 
-    *  Task update rules *
+    *  Task fidelity rules — CRITICAL *
 
-    1. The task must contain some actions: "Buy, Book, Find, Check, Choose show me, give me, add to cart, ...', ideally invovling transactions with a specific product or service. If possible, avoid information seeking tasks like "explore, review, read" etc. 
-    2. You should only propose tasks that do not require login to execute the task.
-    3. You should propose tasks that are clear and specific, e.g. it should contain details like "buy/book something under $100", "find a product with 4 stars" etc.
-    4. Update the details of the task, such price, date, location, etc. based on the current set of actions and the proposed action.
-    5. The updated task must remain solvable. It should be possible to complete the task using the available website/app interface, and it should not require finding an item, product, service, or option that does not exist.
+    1. The "task" field in your JSON output MUST exactly match the overall task above, word-for-word. Copy it verbatim.
+    2. Do NOT change the task type (information-seeking ↔ transactional). Do NOT add, drop, or substitute any constraint (price, date, location, identifier, person name).
+    3. If the overall task is information-seeking ("find / check / what is / explain / read about"), keep pursuing the information — do NOT silently convert it into "find a dealer contact form" or "request a quote" or any other action.
+    4. If the task seems impossible on this site, keep pursuing what is visibly available; when you have done your best, issue `stop` with an explanation. Do NOT swap in an easier task.
+    5. **Anti-drift check before emitting JSON**: confirm your "task" string is byte-identical to the overall_task above. If they differ at all, fix it before output.
 
-    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [element ID] [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
+    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
     Action output should follow the syntax as given below:
     `click [element ID]`: This action clicks on an element with a specific id on the webpage.
-    `type [element ID] [content]`: Use this to type the content into the field with id. This action only types text and does not press Enter. Both the content and the id should be within square braces as per the syntax.
+    `type [content]`: Use this to type the content into the currently focused field. This action only types text and does not press Enter. The content should be within square braces as per the syntax.
     `enter`: Press the Enter key. Use this as a separate action after typing when submitting a search or form requires Enter.
     `select [element ID] [content of option to select]`: Select an option from a dropdown menu. The content of the option to select should be within square braces. When you get (select and option) tags from the accessibility tree , you need to select the serial number (element_id) corresponding to the select tag , not the option, and select the most likely content corresponding to the option as input.
     `scroll [down]`: Scroll the page down. 
@@ -45,11 +45,11 @@ class TaskRefinerAgent:
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
     2. The action should be an atomic action from the given action space - click, type, enter, scroll (up or down) or stop
-    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [43] [content to type]", "enter", "scroll [up]", "scroll [down]".
+    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [content to type]", "enter", "scroll [up]", "scroll [down]".
     4. The natural language form of action (corresponding to the field "action_in_natural_language") should be consistent with the grounded version of the action (corresponding to the field "grounded_action"). Do NOT add any additional information in the grounded action. For example, if a particular element ID is specified in the grounded action, a description of that element must be present in the natural language action. 
     5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed. 
     6. You should issue a “stop” action if the current webpage asks to login or for credit card information. 
-    7. To input text, there is NO need to click textbox first, directly type content. If you need to submit after typing, output `enter` as the next separate action.
+    7. To input text, first output `click [element ID]` on the target textbox/search field. In the next step output `type [content]`. If submission is needed, output `enter` as the third separate step. Do not combine click, type, and enter in one action.
     8. STRICTLY Avoid repeating the same action (click/type) if the webpage remains unchanged. You may have selected the wrong web element.
     9. If you cannot identify a valid visible text input or search box in the current parsed HTML/accessibility tree, do not output a type action. Use click or scroll instead.
     10. Do NOT use quotation marks in the action generation.
@@ -70,7 +70,7 @@ You are given the webpage screenshot, parsed HTML/accessibility tree, and the li
 
 Your job: pick the NEXT single atomic action that makes progress on the overall task.
 
-*ACTION SPACE*: [`click [element ID]`, `type [element ID] [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, `stop`].
+*ACTION SPACE*: [`click [element ID]`, `type [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, `stop`].
 
 *RULES*:
 1. Do NOT modify or rewrite the overall task. Output the SAME task verbatim in the "task" field every step.
@@ -82,7 +82,7 @@ Your job: pick the NEXT single atomic action that makes progress on the overall 
 7. Don't get stuck — if a path doesn't work after 3-4 actions, try a different path (search box, top nav, footer, sitemap).
 8. **Step budget awareness**: If you have already taken 20+ actions, this is your last chance — issue `stop` on the next action with your best partial answer based on what you have seen so far. Do NOT continue exploring past 25 actions.
 9. STRICTLY avoid repeating the same action if the page didn't change — try a different element or strategy.
-10. If a content type input is selected, write the actual text to type in the natural language action and grounded action.
+10. To input text, first output `click [element ID]` on the target textbox/search field. In the next step output `type [content]`. If submission is needed, output `enter` as the third separate step. Do not combine click, type, and enter in one action.
 11. If a login or credit card page appears, issue `stop`.
 12. **CRITICAL**: Whenever you issue `stop` on an information-seeking task, the "answer" field must be NON-EMPTY and the content must be DIRECTLY READABLE in the current screenshot. An answer not grounded in the visible page = failure.
 

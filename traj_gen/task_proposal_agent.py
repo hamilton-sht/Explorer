@@ -22,10 +22,10 @@ class TaskProposalAgent:
     2. Given the webpage screenshot and parsed HTML/accessibility tree, generate the first action towards completing that task (in natural language form).
     3. Given the webpage screenshot, parsed HTML/accessibility tree, and the natural language action, generate the grounded version of that action.
 
-    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [element ID] [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
+    *ACTION SPACE*: Your action space is: [`click [element ID]`, `type [content]`, `enter`, `select [element ID] [content of option to select]`, `scroll [up]`, `scroll [down]`, and `stop`].
     Action output should follow the syntax as given below:
     `click [element ID]`: This action clicks on an element with a specific id on the webpage.
-    `type [element ID] [content]`: Use this to type the content into the field with id. This action only types text and does not press Enter. Both the content and the id should be within square braces as per the syntax.
+    `type [content]`: Use this to type the content into the currently focused field. This action only types text and does not press Enter. The content should be within square braces as per the syntax.
     `enter`: Press the Enter key. Use this as a separate action after typing when submitting a search or form requires Enter.
     `select [element ID] [content of option to select]`: Select an option from a dropdown menu. The content of the option to select should be within square braces. When you get (select and option) tags from the accessibility tree , you need to select the serial number (element_id) corresponding to the select tag , not the option, and select the most likely content corresponding to the option as input.
     `scroll [down]`: Scroll the page down. 
@@ -36,11 +36,11 @@ class TaskProposalAgent:
     *  Action generation rules *
     1. You should generate a single atomic action at each step.
     2. The action should be an atomic action from the given vocabulary - click, type, enter, scroll (up or down) or stop
-    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [43] [content to type]", "enter", "scroll [up]", "scroll [down]".
+    3. The arguments to each action should be within square braces where applicable. For example, "click [127]", "type [content to type]", "enter", "scroll [up]", "scroll [down]".
     4. The natural language form of action (corresponding to the field "action_in_natural_language") should be consistent with the grounded version of the action (corresponding to the field "grounded_action"). Do NOT add any additional information in the grounded action. For example, if a particular element ID is specified in the grounded action, a description of that element must be present in the natural language action. 
     5. If the type action is selected, the natural language form of action ("action_in_natural_language") should always specify the actual text to be typed. 
     6. You should issue a “stop” action if the current webpage asks to login or for credit card information. 
-    7. To input text, there is NO need to click textbox first, directly type content. If you need to submit after typing, output `enter` as the next separate action.
+    7. To input text, first output `click [element ID]` on the target textbox/search field. In the next step output `type [content]`. If submission is needed, output `enter` as the third separate step. Do not combine click, type, and enter in one action.
     8. STRICTLY Avoid repeating the same action (click/type) if the webpage remains unchanged. You may have selected the wrong web element.
     9. Do NOT use quotation marks in the action generation.
 
@@ -51,6 +51,9 @@ class TaskProposalAgent:
     4. For each task, provide concrete information or constraints, and use mock-up information (identifier, number, personal information, name, attributes, etc.) to make the task more specific and realistic.
     5. The task description should provide all the necessary information to complete the task.
     6. The task should be feasible to complete by a real user and should not require any additional information that is not available on the website.
+    7. **The task MUST have a concrete verifiable target** — at least one of: a specific number/date/price visible on a page, a specific page reached (e.g. "Privacy Policy page"), a form filled with given values, or a specific product added to cart. Avoid pure "Read / Browse / Explore / Learn about" tasks that have no checkable endpoint.
+    8. **The task MUST be solvable within ~20 atomic actions** using only click/type/scroll/select on this website. Do NOT propose tasks requiring: external search engines, bookmarks, file downloads to a specific folder, CAPTCHA, login/registration, payment processing, multi-day booking flows, or features that don't exist on this site.
+    9. **The task MUST be reachable from the current homepage via visible navigation** (top nav, search box, footer links). If you don't see a clear path from the current screenshot, choose a different task that you DO see a path to.
 
     The output should be in below format:
     *OUTPUT FORMAT*: Please give a short analysis of the screenshot, parsed HTML/accessibility tree, then put your answer within ``` ```, for example, "In summary, the proposed task and the corresponding action is: ```{{"task": <TASK>:str, "action_in_natural_language":<ACTION_IN_NATURAL_LANGUAGE>:str, "grounded_action": <ACTION>:str}}```"

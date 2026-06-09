@@ -99,11 +99,12 @@ def main():
     p.add_argument("--api-key", default=os.environ.get("API_KEY", ""))
     p.add_argument("--max-steps", type=int, default=15)
     p.add_argument("--timeout", type=int, default=1200)
+    p.add_argument("--sample-file", default=str(SAMPLE), help="JSONL file with tasks/sites")
     args = p.parse_args()
     if not args.api_key:
         print("ERROR: --api-key or API_KEY env required", file=sys.stderr); sys.exit(2)
 
-    tasks = [json.loads(l) for l in open(SAMPLE)]
+    tasks = [json.loads(l) for l in open(args.sample_file)]
     tracks = [t.strip() for t in args.tracks.split(",") if t.strip()]
     jobs = [(track, i, task) for track in tracks for i, task in enumerate(tasks)]
     print(f"Running {len(jobs)} jobs ({len(tasks)} tasks × {len(tracks)} tracks) with {args.workers} workers")

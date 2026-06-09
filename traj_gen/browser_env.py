@@ -118,6 +118,34 @@ class ScriptBrowserEnv:
             else:
                 logging.warning(f"auth_name={auth_name!r} set but no saved state found")
         self.context = self.browser.new_context(**context_kwargs)
+        # Abort font requests so document.fonts.ready resolves immediately.
+        # Without this, page.screenshot() (which waits for fonts) can hang on
+        # sites with slow/blocked font CDNs (e.g. legalaid.tas.gov.au,
+        # rivers.alberta.ca, voiceofsandiego.org) and time out at 15s.
+        try:
+            self.context.route(
+                "**/*",
+                lambda route: (
+                    route.abort()
+                    if route.request.resource_type == "font"
+                    else route.continue_()
+                ),
+            )
+        except Exception as route_err:
+            logging.warning(f"font-abort route install failed: {route_err}")
+        # Belt + braces: also override document.fonts.ready to resolve immediately,
+        # so page.screenshot() never blocks waiting for fonts even when the CSS
+        # @font-face state is stuck in "loading" rather than "failed".
+        try:
+            self.context.add_init_script(
+                "Object.defineProperty(document, 'fonts', {"
+                "  configurable: true,"
+                "  value: { ready: Promise.resolve(), check: () => true,"
+                "           load: () => Promise.resolve(), status: 'loaded' }"
+                "});"
+            )
+        except Exception as init_err:
+            logging.warning(f"fonts.ready init script failed: {init_err}")
         if not url.startswith("http"):
             self.page = None
             return

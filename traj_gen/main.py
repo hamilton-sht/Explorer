@@ -176,7 +176,6 @@ def make_step_record(
     viewport_size,
     action_nl,
     grounded_action,
-    raw_response,
     parsed_action,
     protocol_action,
     execution_success,
@@ -200,7 +199,6 @@ def make_step_record(
         "tool_call_token": TOOL_CALL_END,
         "parsed_action": parsed_action,
         "raw_grounded_action": grounded_action,
-        "raw_model_response": raw_response,
         "x_next": {"image": f"screenshot_{step + 1}.png"},
         "env_meta_next": {
             "observation_id": next_obs_id,
@@ -491,7 +489,6 @@ class Explorer:
                         )
 
                     current_url_before = browser_env_state["page"].url
-                    action["acc_tree_before"] = browser_env_state["content_str"]
                     # action['html_before'] = browser_env_state['html']
                     with open(
                         os.path.join(ex_log_dir, f"html_{step}.html"),
@@ -649,9 +646,7 @@ class Explorer:
                 action["step_action_nl"] = new_action_nl
                 action["new_action_grounded"] = new_action_grounded
                 action["parsed_action"] = parsed_action
-                action["bounding_box_coord"] = bounding_box_coord
                 action["step_refined_goal"] = refined_goal
-                action["step_reasoning_response"] = response
 
                 task_refinement_history.append(refined_goal)
                 action_history.append(new_action_nl)
@@ -681,7 +676,6 @@ class Explorer:
                     viewport_size=viewport_size,
                     action_nl=new_action_nl,
                     grounded_action=new_action_grounded,
-                    raw_response=response,
                     parsed_action=parsed_action,
                     protocol_action=protocol_action,
                     execution_success=is_action_valid,

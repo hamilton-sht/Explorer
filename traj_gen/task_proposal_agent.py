@@ -61,6 +61,12 @@ class TaskProposalAgent:
     9. Use quotation marks only for string arguments inside function calls.
 
     *  Task proposal rules *
+    0. **DEAD-PAGE DETECTION (FIRST CHECK)**: If the screenshot shows a SERVER ERROR PAGE, a BROWSER ERROR PAGE, or an ACCESS BLOCK page — DO NOT propose a task. Issue `stop()` as the first action and set "task" to "site unreachable". The page is dead, there is nothing meaningful for a user to do here. Signals (any one is enough):
+       - HTTP error codes shown as page content: "403", "404", "500", "502", "503", "504", "Forbidden", "Not Found", "Bad Gateway", "Service Unavailable", "Gateway Timeout"
+       - Access blocks: "Access Denied", "You don't have permission", "This site can't be reached", "DNS_PROBE_FINISHED", "ERR_CONNECTION_REFUSED", Cloudflare "Sorry, you have been blocked" / "Checking your browser"
+       - CAPTCHA gates: "I'm not a robot", reCAPTCHA, hCaptcha, Cloudflare Turnstile as the main page content
+       - Login walls: a login form is the ONLY meaningful thing visible on the homepage
+       Reading off the error code as `answer("403 ERROR")` is NOT a real task — that is the system failing, not a user succeeding. Refuse it.
     1. You should propose tasks that are relevant to the website and can be completed using the website.
     2. You should only propose tasks that do not require login to execute the task.
     3. You should propose tasks that are clear and specific.

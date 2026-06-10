@@ -6,16 +6,49 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from PIL import Image, ImageStat
+
 
 def verifier_status(text):
     match = re.search(r'Status[*\s]*[:：][*\s]*["“]?(success|failure)', text or "", re.I)
     return match.group(1).lower() if match else "unknown"
 
 
-def reject_reasons(traj):
+def low_information_screenshot(path):
+    try:
+        img = Image.open(path).convert("L").resize((160, 90))
+        return ImageStat.Stat(img).stddev[0] < 12
+    except Exception:
+        return False
+
+
+def has_low_information_run(traj, source_dir):
+    screenshots = []
+    for ref in traj.get("observation_refs", []):
+        name = Path(ref).name
+        if name.startswith("screenshot_action_"):
+            continue
+        if name.startswith("screenshot_") and name.endswith(".png"):
+            screenshots.append(source_dir / name)
+    screenshots = [p for p in screenshots if p.exists()]
+    if len(screenshots) < 3:
+        return False
+
+    flags = [low_information_screenshot(p) for p in screenshots]
+    max_run = 0
+    cur_run = 0
+    for flag in flags:
+        cur_run = cur_run + 1 if flag else 0
+        max_run = max(max_run, cur_run)
+    return max_run >= 3 or (sum(flags) / len(flags)) >= 0.5
+
+
+def reject_reasons(traj, source_dir=None):
     reasons = []
     if not traj.get("steps"):
         reasons.append("missing_steps")
+    if "regex fail" in json.dumps(traj, ensure_ascii=False).lower():
+        reasons.append("regex_fail")
     for step in traj.get("steps", []):
         if "x_t" not in step or "x_next" not in step:
             reasons.append("missing_observation")
@@ -31,6 +64,8 @@ def reject_reasons(traj):
     status = verifier_status(traj.get("verifier_agent_response", ""))
     if status != "success":
         reasons.append(f"verifier_{status}")
+    if source_dir is not None and has_low_information_run(traj, source_dir):
+        reasons.append("low_information_screenshots")
     return sorted(set(reasons))
 
 
@@ -109,7 +144,7 @@ def main():
         artifact_prefix = Path("artifacts") / traj_id
         link_or_copy_artifacts(path.parent, artifacts_dir / traj_id, args.copy_artifacts)
 
-        reasons = reject_reasons(traj)
+        reasons = reject_reasons(traj, path.parent)
         status = verifier_status(traj.get("verifier_agent_response", ""))
         qa_items.append(
             {

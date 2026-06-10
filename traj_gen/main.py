@@ -329,6 +329,31 @@ def save_action_som(raw_screenshot_path, output_path, bounding_box_coord, label=
     img.save(output_path)
 
 
+def save_click_marker(raw_screenshot_path, output_path, point, viewport_size=None):
+    img = Image.open(raw_screenshot_path).convert("RGB")
+
+    if viewport_size is not None:
+        vp_w = int(viewport_size.get("width", img.width))
+        vp_h = int(viewport_size.get("height", img.height))
+        if img.height > vp_h or img.width > vp_w:
+            img = img.crop((0, 0, min(vp_w, img.width), min(vp_h, img.height)))
+
+    if point is None:
+        img.save(output_path)
+        return
+
+    x, y = float(point[0]), float(point[1])
+    radius = max(8, min(img.width, img.height) // 100)
+    left = max(0, x - radius)
+    top = max(0, y - radius)
+    right = min(img.width - 1, x + radius)
+    bottom = min(img.height - 1, y + radius)
+
+    draw = ImageDraw.Draw(img)
+    draw.ellipse([left, top, right, bottom], fill=(255, 0, 0), outline=(255, 255, 255), width=3)
+    img.save(output_path)
+
+
 def select_refiner_image_history(image_history, max_images):
     if max_images <= 0 or not image_history:
         return []
@@ -647,9 +672,18 @@ class Explorer:
 
                 logging.info(f"refined_goal: {refined_goal}\n")
 
+                # Dead-page detection: proposal flagged the homepage as unreachable
+                # (4xx/5xx/Access Denied/Cloudflare/CAPTCHA). Respect stop() — don't
+                # force scrolling on an error page. The trajectory ends; verifier
+                # gets an empty trajectory which judges as failure (or unknown).
+                is_dead_page = isinstance(refined_goal, str) and (
+                    "site unreachable" in refined_goal.lower()
+                    or "unreachable" in refined_goal.lower()
+                )
                 if (
                     new_action_grounded in ("stop", "stop()")
                     and not step_answer
+                    and not is_dead_page
                     and len(task_trajectory_data["actions"]) < self.args.min_actions_before_stop
                 ):
                     logging.info(
@@ -704,10 +738,34 @@ class Explorer:
                     logging.info("failed to convert action to protocol format")
                     logging.info(traceback.format_exc())
 
+                click_marker_ref = None
+                if (
+                    protocol_action
+                    and protocol_action["name"] in ("click", "doubleclick", "rightclick")
+                    and protocol_action.get("target_actions")
+                    and not self.args.no_dump_screenshots
+                ):
+                    raw_screenshot_path = os.path.join(ex_log_dir, f"screenshot_{step}.png")
+                    marker_path = os.path.join(ex_log_dir, f"screenshot_action_{step}.png")
+                    point = protocol_action["target_actions"][0].get("args", {}).get("point")
+                    try:
+                        save_click_marker(
+                            raw_screenshot_path,
+                            marker_path,
+                            point,
+                            viewport_size=viewport_size,
+                        )
+                        click_marker_ref = f"screenshot_action_{step}.png"
+                    except Exception:
+                        logging.info("failed to save click marker screenshot")
+                        logging.info(traceback.format_exc())
+
                 action["step_action_nl"] = new_action_nl
                 action["new_action_grounded"] = new_action_grounded
                 action["parsed_action"] = parsed_action
                 action["step_refined_goal"] = refined_goal
+                if click_marker_ref:
+                    action["action_screenshot"] = click_marker_ref
 
                 task_refinement_history.append(refined_goal)
                 action_history.append(new_action_nl)
@@ -728,6 +786,8 @@ class Explorer:
                     protocol_action=protocol_action,
                     execution_success=is_action_valid,
                 )
+                if click_marker_ref:
+                    step_record["action_screenshot"] = click_marker_ref
                 task_trajectory_data["steps"].append(step_record)
 
                 if new_action_grounded in ("stop", "stop()") or new_action_grounded.startswith("answer("):
@@ -793,7 +853,7 @@ class Explorer:
             1
             for a in task_trajectory_data.get("actions", [])
             if not (a.get("new_action_grounded", "") or "").startswith(
-                ("scroll", "wait", "stop", "answer")
+                ("wait", "stop")
             )
         )
         budget_hit_relabel = (

@@ -67,8 +67,9 @@ def run_one(args, index, url):
     env.setdefault("API_BASE_URL", args.api_base_url)
     env.setdefault("CLAUDE_COMPAT_MAX_TEXT_CHARS", str(args.max_text_chars))
 
-    cmd = [
-        "conda", "run", "-n", args.conda_env, "python", "-m", "traj_gen.main",
+    python_cmd = ["python"] if args.conda_env == "none" else ["conda", "run", "-n", args.conda_env, "python"]
+    cmd = python_cmd + [
+        "-m", "traj_gen.main",
         "--model-dir", str(run_dir),
         "--init-url", url,
         "--max-steps", str(args.max_steps),

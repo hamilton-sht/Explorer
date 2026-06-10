@@ -154,7 +154,7 @@ class ScriptBrowserEnv:
         page.client = client  # type: ignore
 
         try:
-            page.goto(url, wait_until="commit", timeout=30000)
+            page.goto(url, wait_until="commit", timeout=60000)
         except Exception as e:
             logging.error(traceback.format_exc())
             raise e

@@ -2,6 +2,7 @@
 trajectories/
 test_run/
 test_traj/
+tmp_export*/
 
 # Python
 __pycache__/
